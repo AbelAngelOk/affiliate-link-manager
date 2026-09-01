@@ -1,0 +1,12 @@
+# Backup continuo del SQLite embebido a un bucket (ver 03-stack-tecnologico.md
+# §3.1). Copiar a litestream.yml y completar el bucket real antes de usarlo;
+# las credenciales van por env vars (LITESTREAM_ACCESS_KEY_ID /
+# LITESTREAM_SECRET_ACCESS_KEY), nunca hardcodeadas acá.
+dbs:
+  - path: /data/prod.db
+    replicas:
+      - type: s3
+        bucket: TU-BUCKET-AQUI
+        path: links-referidos-api
+        endpoint: https://<account-id>.r2.cloudflarestorage.com # si usás Cloudflare R2; omitir si es S3 real
+        region: auto

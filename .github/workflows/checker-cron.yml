@@ -1,0 +1,20 @@
+# Etapa 7 (05-plan-de-desarrollo.md): dispara el verificador de disponibilidad
+# cada 12h contra la API ya desplegada. Requiere dos secrets en el repo:
+#   API_BASE_URL — ej. https://links-referidos-api.fly.dev
+#   API_KEY      — la misma API key configurada en el servidor
+name: Checker de disponibilidad
+
+on:
+  schedule:
+    - cron: "0 */12 * * *"
+  workflow_dispatch: {} # permite dispararlo a mano desde la pestaña Actions
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /internal/check
+        run: |
+          curl -sf -X POST \
+            -H "Authorization: Bearer ${{ secrets.API_KEY }}" \
+            "${{ secrets.API_BASE_URL }}/internal/check"

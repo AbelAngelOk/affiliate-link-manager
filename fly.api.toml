@@ -1,0 +1,38 @@
+# Config de Fly.io para la API (ver 03-stack-tecnologico.md §3.6). Requiere
+# un volumen persistente para el archivo SQLite — no aplica a plataformas
+# serverless/edge sin disco (ver 03-stack-tecnologico.md §3.1).
+#
+# Vive en la raíz del repo (no en apps/api/) a propósito: el Dockerfile
+# necesita como build context la raíz del monorepo (copia package-lock.json
+# de acá para instalar el workspace completo), y fly usa por defecto el
+# directorio donde está este archivo como contexto de build.
+#
+# Deploy: fly launch --config fly.api.toml
+# (reemplazar `app` por un nombre único antes del primer deploy)
+
+app = "links-referidos-api"
+primary_region = "eze" # Buenos Aires — ajustar según dónde estén los usuarios finales
+
+[build]
+  dockerfile = "apps/api/Dockerfile"
+
+[env]
+  PORT = "3000"
+  DATABASE_PATH = "/data/prod.db"
+
+[mounts]
+  source = "links_referidos_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[http_service.checks]]
+  path = "/health"
+  interval = "30s"
+  timeout = "5s"
+  method = "GET"

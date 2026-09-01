@@ -1,0 +1,99 @@
+# Plan de desarrollo por etapas
+
+Basado en las decisiones ya tomadas en `01-solucion-final.md`, `02-gestion-links-afiliados.md`, `03-stack-tecnologico.md` y `04-alcance-y-limitaciones.md`: Node.js + Fastify (API), SQLite embebido, single-tenant con API key, monorepo (`apps/api` + `apps/dashboard`).
+
+Cada etapa es chica, verificable y deja el proyecto en un estado funcional — no se pasa a la siguiente hasta poder probar la anterior. El orden prioriza llegar cuanto antes al punto donde el sistema **ya resuelve el problema original** (un link que se cae no rompe la app), y deja lo accesorio (docs públicas, dashboard, checker automático) para después.
+
+## Estado actual
+
+| Etapa | Estado |
+|---|---|
+| 0 — Bootstrap | ✅ Hecho y verificado |
+| 1 — Modelo de datos | ✅ Hecho y verificado |
+| 2 — Auth por API key | ✅ Hecho y verificado |
+| 3 — Endpoints de lectura | ✅ Hecho y verificado |
+| 4 — Endpoint de redirección | ✅ Hecho y verificado |
+| 5 — CRUD de administración | ✅ Hecho y verificado |
+| 6 — OpenAPI/Postman/llms.txt | ✅ Hecho y verificado |
+| 7 — Verificador de disponibilidad | ✅ Hecho y verificado |
+| 8 — Notificaciones (Telegram) | ✅ Hecho y verificado (sin bot real todavía: cae a log en consola) |
+| 9 — Dashboard (Next.js) | ✅ Hecho y verificado |
+| 10 — Sitio de docs (SEO/GEO) | ✅ Hecho y verificado |
+| 11 — Deploy y operación | ⏳ Artefactos preparados, deploy real sin verificar (ver nota abajo) |
+
+**Nota sobre Etapa 11:** se prepararon `apps/api/Dockerfile`, `fly.api.toml`, `apps/api/litestream.yml.example` y el workflow de cron (`.github/workflows/checker-cron.yml`), pero no se pudo *verificar* el build de Docker en este entorno (Docker Desktop no está corriendo acá) ni hacer un deploy real (requiere cuentas y credenciales de Fly.io/Vercel que no están disponibles en esta sesión). Son un punto de partida razonable, no un deploy probado — conviene revisarlos con un `docker build` real antes de confiar en ellos en producción.
+
+## Etapa 0 — Bootstrap del repo
+- Monorepo con npm workspaces (se usó npm en vez de pnpm — no estaba instalado y npm 10 ya lo soporta nativo): `apps/api`, `apps/dashboard` (este último recién se llena de contenido en Etapa 9).
+- TypeScript, ESLint/Prettier, `.gitignore`, `.env.example`.
+- `apps/api`: Fastify mínimo con un endpoint `GET /health`.
+- **Listo cuando:** `npm run dev:api` levanta la API y `GET /health` responde 200.
+
+## Etapa 1 — Modelo de datos y persistencia
+- SQLite vía `better-sqlite3`, con `drizzle-orm` como capa tipada (migraciones + queries), dado que no estaba fijado el ORM en el doc de stack — es la elección natural para no escribir SQL a mano en ~6 tablas y mantener migraciones versionadas.
+- Tablas según `01-solucion-final.md` §2: `User` (una sola fila seed), `App`, `Product` (con los límites de longitud de §2.1 como constraints/validación), `ProductApp`, `Slot`, `SlotLink`, `CheckLog`.
+- Script de seed para datos de prueba en local.
+- **Listo cuando:** las migraciones corren limpio sobre un archivo `.db` nuevo, y un script de seed carga un producto de ejemplo con slots y links.
+
+## Etapa 2 — Autenticación por API key
+- Hook `onRequest` en Fastify que valida `Authorization: Bearer <API_KEY>` contra la variable de entorno.
+- Aplica a todas las rutas `/v1/*` y `/admin/*`. **`/r/{slot_id}` queda público** — es el link que va en el botón de la app, no puede requerir credenciales.
+- **Listo cuando:** un request sin key a `/v1/*` devuelve 401, y con key válida pasa.
+
+## Etapa 3 — Endpoints de lectura (consumo desde las apps)
+- `GET /v1/products?app_id=` (con `include_unavailable` opcional).
+- `GET /v1/products/{id}/slots?provider=&country=`.
+- **Listo cuando:** con los datos de seed de Etapa 1, ambos endpoints devuelven el shape exacto definido en `01-solucion-final.md` §4.
+
+## Etapa 4 — Endpoint de redirección (el corazón del proyecto)
+- `GET /r/{slot_id}` → 302 al `SlotLink` activo de mayor prioridad, `410 Gone` si no hay ninguno.
+- **Este es el corte mínimo que ya resuelve el problema original.** Con las Etapas 1-4 completas, se puede pegar `https://tu-api/r/{slot_id}` como `href` en un botón real de `training-app` (o la que sea) y probar el flujo de punta a punta, aunque todo lo demás (checker, dashboard, docs públicas) todavía no exista.
+- **Listo cuando:** el link de un slot cargado a mano en Etapa 1 redirige correctamente desde un botón real de alguna app existente.
+
+## Etapa 5 — Endpoints de escritura / administración
+- CRUD (`POST`/`PATCH`/`DELETE`) para `App`, `Product`, `ProductApp`, `Slot`, `SlotLink`.
+- Validación de los límites de caracteres de `01-solucion-final.md` §2.1 en la escritura (422 si se excede), texto plano forzado (rechazar HTML/Markdown).
+- **Listo cuando:** se puede dar de alta un producto completo (con sus slots y links) vía requests a la API, sin tocar la base de datos a mano.
+
+## Etapa 6 — Documentación de la API (OpenAPI, Postman, llms.txt)
+- `@fastify/swagger` generando el spec desde los schemas ya definidos en las Etapas 3 y 5 (no se escribe a mano, sale de las rutas existentes).
+- `/openapi.json` público, `@fastify/swagger-ui` en `/docs`.
+- Script que genera la colección de Postman a partir del spec (`openapi-to-postmanv2`) y la publica.
+- `/llms.txt` con índice de recursos clave (spec, guía rápida, ejemplos curl por endpoint).
+- **Listo cuando:** se puede importar la colección a Postman y hacer todos los requests documentados sin mirar el código.
+
+## Etapa 7 — Verificador de disponibilidad
+- Endpoint interno protegido (ej. `POST /internal/check`) que dispara el job.
+- **Mercado Libre:** `GET api.mercadolibre.com/items/{id}` por cada `SlotLink` activo, actualiza `status` según la respuesta.
+- **Amazon:** chequeo débil (HTTP status del link) marcado explícitamente como señal de alerta, no de verdad — ver limitación de acceso a la Creators API en `04-alcance-y-limitaciones.md`.
+- Umbral de fallos consecutivos antes de marcar `broken` (evita falsos positivos por caídas puntuales).
+- Al fallar un `SlotLink`, promueve el siguiente de la cola; si no queda ninguno, el `Slot` pasa a `unavailable`.
+- GitHub Actions con cron pegándole a `/internal/check` cada 12-24h.
+- **Listo cuando:** romper a propósito un link de prueba en Etapa 1 hace que, tras correr el check, el slot pase al siguiente candidato (o a `unavailable` si no hay más).
+
+## Etapa 8 — Notificaciones
+- Bot de Telegram, mensaje cuando un `Slot` pasa a `unavailable`.
+- **Listo cuando:** el escenario de prueba de Etapa 7 dispara un mensaje real al bot.
+
+## Etapa 9 — Dashboard (Next.js)
+- Login simple (API key → cookie de sesión).
+- Cliente TypeScript generado desde `/openapi.json` (mismo repo, sin publicar paquete — ver `03-stack-tecnologico.md` §3.6).
+- CRUD sobre las mismas entidades de Etapa 5, con vista prioritaria de "productos/slots en alerta".
+- **Listo cuando:** se puede dar de alta un producto completo desde el dashboard sin usar Postman.
+
+## Etapa 10 — Sitio de documentación (SEO/GEO) dentro del mismo Next.js
+- Páginas estáticas (SSG) generadas a partir del OpenAPI spec + contenido propio en Markdown.
+- JSON-LD `schema.org`, `sitemap.xml`, `robots.txt`, meta tags por página.
+- Botón "Run in Postman", link a `/llms.txt`.
+- **Listo cuando:** el sitio está desplegado y cada endpoint documentado tiene su propia página indexable.
+
+## Etapa 11 — Deploy y operación
+- API a Fly.io/Railway con volumen persistente para SQLite + Litestream apuntando a un bucket.
+- Dashboard/docs (Next.js) a Vercel.
+- Cron de GitHub Actions apuntando a producción.
+- Monitoreo básico de uptime sobre `/r/{slot_id}` (single point of failure documentado en `04-alcance-y-limitaciones.md`).
+- **Listo cuando:** el flujo completo (botón real en una app → redirect → checker → dashboard) corre en producción, no solo en local.
+
+## Fuera de este plan (a futuro, no ahora)
+- Migración a OAuth2 multi-tenant (`01-solucion-final.md` §3) — solo cuando exista un segundo entorno/usuario real.
+- Overrides de texto por app y marketplaces adicionales — ver `04-alcance-y-limitaciones.md` §4.2.
