@@ -11,7 +11,7 @@
 # (reemplazar `app` por un nombre único antes del primer deploy)
 
 app = "links-referidos-api"
-primary_region = "eze" # Buenos Aires — ajustar según dónde estén los usuarios finales
+primary_region = "gru" # Sao Paulo — región más cercana disponible en Fly (eze/Buenos Aires ya no existe en la lista de regiones)
 
 [build]
   dockerfile = "apps/api/Dockerfile"
@@ -23,6 +23,13 @@ primary_region = "eze" # Buenos Aires — ajustar según dónde estén los usuar
 [mounts]
   source = "links_referidos_data"
   destination = "/data"
+
+# Nota: no se usa [deploy] release_command para migrar — la máquina efímera
+# que corre el release_command no tiene montado el volumen (limitación de
+# Fly con volúmenes single-attach), así que /data no existe ahí. En cambio,
+# las migraciones corren al arrancar el propio proceso (ver src/server.ts),
+# que sí corre en la máquina con el volumen montado. drizzle-orm/migrator
+# es idempotente, así que correrlo en cada boot es seguro.
 
 [http_service]
   internal_port = 3000

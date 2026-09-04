@@ -1,5 +1,9 @@
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { buildApp } from "./app.js";
 import { config } from "./config.js";
+import { db } from "./db/client.js";
+
+migrate(db, { migrationsFolder: "./drizzle" });
 
 const app = await buildApp();
 

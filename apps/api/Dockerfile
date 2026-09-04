@@ -6,6 +6,7 @@ FROM node:22-slim AS deps
 WORKDIR /repo
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/package.json
+COPY apps/dashboard/package.json apps/dashboard/package.json
 RUN npm ci
 
 FROM deps AS build
