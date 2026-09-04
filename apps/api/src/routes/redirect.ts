@@ -1,36 +1,40 @@
 import type { FastifyInstance } from "fastify";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { slotLinks } from "../db/schema.js";
+import { slots } from "../db/schema.js";
 
 // Público, sin auth: es el link que va en el href del botón real de la app.
+// Clave por producto+dominio (no por el id de un slot puntual) para que la
+// URL del botón quede estable aunque el candidato "vigente" cambie con el
+// tiempo — ver 01-solucion-final.md §4.
+//
 // No valida el link "en vivo" en cada click (ver 01-solucion-final.md §4) —
 // confía en el último estado que dejó el verificador periódico (Etapa 7).
 export async function redirectRoutes(fastify: FastifyInstance) {
-  fastify.get<{ Params: { slotId: string } }>(
-    "/r/:slotId",
+  fastify.get<{ Params: { productId: string; dominio: string } }>(
+    "/r/:productId/:dominio",
     {
       schema: {
         tags: ["redirect"],
-        summary: "Redirige al link de afiliado vigente de un slot (público, sin auth)",
+        summary: "Redirige al link vigente de un producto+dominio (público, sin auth)",
         security: [],
       },
     },
     async (request, reply) => {
-      const { slotId } = request.params;
+      const { productId, dominio } = request.params;
 
-      const [link] = await db
-        .select({ affiliateUrl: slotLinks.affiliateUrl })
-        .from(slotLinks)
-        .where(and(eq(slotLinks.slotId, slotId), eq(slotLinks.status, "active")))
-        .orderBy(asc(slotLinks.priority))
+      const [slot] = await db
+        .select({ affiliateUrl: slots.affiliateUrl })
+        .from(slots)
+        .where(and(eq(slots.productId, productId), eq(slots.dominio, dominio), eq(slots.status, "active")))
+        .orderBy(asc(slots.priority))
         .limit(1);
 
-      if (!link) {
-        return reply.code(410).send({ error: "slot_unavailable" });
+      if (!slot) {
+        return reply.code(410).send({ error: "dominio_unavailable" });
       }
 
-      return reply.redirect(link.affiliateUrl, 302);
+      return reply.redirect(slot.affiliateUrl, 302);
     },
   );
 }

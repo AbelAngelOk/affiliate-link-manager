@@ -1,36 +1,23 @@
 import type { ReactNode } from "react";
+import { Geist } from "next/font/google";
 import "./globals.css";
-import { LogoutButton } from "@/components/LogoutButton";
+import { cn } from "@/lib/utils";
+
+const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata = {
-  title: "Links Referidos — Dashboard",
-  description: "Administración de productos, slots y links de afiliados.",
+  title: "Links Referidos API",
+  description: "Gestión de productos y links de afiliados (Amazon/Mercado Libre) para múltiples apps.",
 };
 
+// Deliberadamente sin nav ni chrome acá: marketing (app/page.tsx), docs
+// (app/docs) y el portal de administración (app/(admin)) tienen cada uno su
+// propio layout — se leen como tres productos distintos, no como secciones
+// de una misma app con un header compartido.
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="es">
-      <body>
-        <nav
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 20,
-            padding: "12px 20px",
-            borderBottom: "1px solid #ddd",
-            background: "white",
-          }}
-        >
-          <strong>Links Referidos</strong>
-          <a href="/alertas">Alertas</a>
-          <a href="/productos">Productos</a>
-          <a href="/apps">Apps</a>
-          <span style={{ marginLeft: "auto" }}>
-            <LogoutButton />
-          </span>
-        </nav>
-        <div style={{ maxWidth: 800, margin: "0 auto", padding: 20 }}>{children}</div>
-      </body>
+    <html lang="es" className={cn("font-sans", geist.variable)}>
+      <body>{children}</body>
     </html>
   );
 }

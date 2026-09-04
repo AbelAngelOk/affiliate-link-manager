@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { and, eq } from "drizzle-orm";
 import { db } from "../../db/client.js";
-import { apps, productApps, products } from "../../db/schema.js";
+import { products } from "../../db/schema.js";
 import { getCurrentUserId } from "../../auth/currentUser.js";
 
 // Texto plano únicamente (rechaza < y >) y límites de longitud según
@@ -14,6 +14,10 @@ const plainText = (maxLength: number, minLength = 1) => ({
   pattern: "^[^<>]*$",
 });
 
+// No hay entidad App: alcanza con el nombre para identificarla, así que
+// "apps" es un array de nombres directamente en el producto (ver schema.ts).
+const appName = plainText(60);
+
 const productBodySchema = {
   type: "object",
   required: ["titulo", "descripcion_corta", "imagen_url", "categoria"],
@@ -24,6 +28,7 @@ const productBodySchema = {
     imagen_url: { type: "string", format: "uri" },
     imagen_alt: plainText(125, 0),
     categoria: plainText(40),
+    apps: { type: "array", items: appName, default: [] },
   },
 } as const;
 
@@ -34,6 +39,7 @@ type ProductBody = {
   imagen_url: string;
   imagen_alt?: string;
   categoria: string;
+  apps?: string[];
 };
 
 export async function adminProductsRoutes(fastify: FastifyInstance) {
@@ -58,6 +64,7 @@ export async function adminProductsRoutes(fastify: FastifyInstance) {
           imagenUrl: b.imagen_url,
           imagenAlt: b.imagen_alt,
           categoria: b.categoria,
+          apps: b.apps ?? [],
         })
         .returning();
       return reply.code(201).send(created);
@@ -69,7 +76,7 @@ export async function adminProductsRoutes(fastify: FastifyInstance) {
     {
       schema: {
         tags: ["admin"],
-        summary: "Edita un producto",
+        summary: "Edita un producto (incluye reemplazar la lista de apps)",
         body: { type: "object", properties: productBodySchema.properties },
       },
     },
@@ -84,6 +91,7 @@ export async function adminProductsRoutes(fastify: FastifyInstance) {
       if (b.imagen_url !== undefined) patch.imagenUrl = b.imagen_url;
       if (b.imagen_alt !== undefined) patch.imagenAlt = b.imagen_alt;
       if (b.categoria !== undefined) patch.categoria = b.categoria;
+      if (b.apps !== undefined) patch.apps = b.apps;
 
       const [updated] = await db
         .update(products)
@@ -107,52 +115,6 @@ export async function adminProductsRoutes(fastify: FastifyInstance) {
         .returning({ id: products.id });
 
       if (!deleted) return reply.code(404).send({ error: "product_not_found" });
-      return reply.code(204).send();
-    },
-  );
-
-  // Asociación N:N producto <-> app (ver 01-solucion-final.md §2)
-  fastify.post<{ Params: { id: string }; Body: { app_id: string } }>(
-    "/products/:id/apps",
-    {
-      schema: {
-        tags: ["admin"],
-        summary: "Asocia un producto a una app",
-        body: { type: "object", required: ["app_id"], properties: { app_id: { type: "string" } } },
-      },
-    },
-    async (request, reply) => {
-      const ownerUserId = await getCurrentUserId();
-      const productId = request.params.id;
-      const appId = request.body.app_id;
-
-      const [product] = await db
-        .select({ id: products.id })
-        .from(products)
-        .where(and(eq(products.id, productId), eq(products.ownerUserId, ownerUserId)));
-      if (!product) return reply.code(404).send({ error: "product_not_found" });
-
-      const [app] = await db
-        .select({ id: apps.id })
-        .from(apps)
-        .where(and(eq(apps.id, appId), eq(apps.ownerUserId, ownerUserId)));
-      if (!app) return reply.code(404).send({ error: "app_not_found" });
-
-      await db.insert(productApps).values({ productId, appId }).onConflictDoNothing();
-      return reply.code(204).send();
-    },
-  );
-
-  fastify.delete<{ Params: { id: string; appId: string } }>(
-    "/products/:id/apps/:appId",
-    { schema: { tags: ["admin"], summary: "Desasocia un producto de una app" } },
-    async (request, reply) => {
-      await getCurrentUserId(); // valida que hay un usuario activo (ver nota en currentUser.ts)
-      await db
-        .delete(productApps)
-        .where(
-          and(eq(productApps.productId, request.params.id), eq(productApps.appId, request.params.appId)),
-        );
       return reply.code(204).send();
     },
   );

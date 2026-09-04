@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS `slots_product_id_dominio_priority_unique`;--> statement-breakpoint
+CREATE UNIQUE INDEX `slots_active_dominio_priority` ON `slots` (`product_id`,`dominio`,`priority`) WHERE "slots"."status" = 'active';

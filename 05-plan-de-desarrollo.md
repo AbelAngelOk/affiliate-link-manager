@@ -31,27 +31,27 @@ Cada etapa es chica, verificable y deja el proyecto en un estado funcional — n
 
 ## Etapa 1 — Modelo de datos y persistencia
 - SQLite vía `better-sqlite3`, con `drizzle-orm` como capa tipada (migraciones + queries), dado que no estaba fijado el ORM en el doc de stack — es la elección natural para no escribir SQL a mano en ~6 tablas y mantener migraciones versionadas.
-- Tablas según `01-solucion-final.md` §2: `User` (una sola fila seed), `App`, `Product` (con los límites de longitud de §2.1 como constraints/validación), `ProductApp`, `Slot`, `SlotLink`, `CheckLog`.
+- Tablas según `01-solucion-final.md` §2: `User` (una sola fila seed), `Product` (con los límites de longitud de §2.1 como constraints/validación, y `apps` como array — no hay entidad `App` separada), `Slot` (un único link + prioridad + dominio, sin tabla separada de "links"), `CheckLog`.
 - Script de seed para datos de prueba en local.
 - **Listo cuando:** las migraciones corren limpio sobre un archivo `.db` nuevo, y un script de seed carga un producto de ejemplo con slots y links.
 
 ## Etapa 2 — Autenticación por API key
 - Hook `onRequest` en Fastify que valida `Authorization: Bearer <API_KEY>` contra la variable de entorno.
-- Aplica a todas las rutas `/v1/*` y `/admin/*`. **`/r/{slot_id}` queda público** — es el link que va en el botón de la app, no puede requerir credenciales.
+- Aplica a todas las rutas `/v1/*` y `/admin/*`. **`/r/{product_id}/{dominio}` queda público** — es el link que va en el botón de la app, no puede requerir credenciales.
 - **Listo cuando:** un request sin key a `/v1/*` devuelve 401, y con key válida pasa.
 
 ## Etapa 3 — Endpoints de lectura (consumo desde las apps)
-- `GET /v1/products?app_id=` (con `include_unavailable` opcional).
-- `GET /v1/products/{id}/slots?provider=&country=`.
+- `GET /v1/products?app=` (con `include_unavailable` opcional).
+- `GET /v1/products/{id}/slots?dominio=`.
 - **Listo cuando:** con los datos de seed de Etapa 1, ambos endpoints devuelven el shape exacto definido en `01-solucion-final.md` §4.
 
 ## Etapa 4 — Endpoint de redirección (el corazón del proyecto)
-- `GET /r/{slot_id}` → 302 al `SlotLink` activo de mayor prioridad, `410 Gone` si no hay ninguno.
-- **Este es el corte mínimo que ya resuelve el problema original.** Con las Etapas 1-4 completas, se puede pegar `https://tu-api/r/{slot_id}` como `href` en un botón real de `training-app` (o la que sea) y probar el flujo de punta a punta, aunque todo lo demás (checker, dashboard, docs públicas) todavía no exista.
+- `GET /r/{product_id}/{dominio}` → 302 al `Slot` activo de mayor prioridad para ese dominio, `410 Gone` si no hay ninguno.
+- **Este es el corte mínimo que ya resuelve el problema original.** Con las Etapas 1-4 completas, se puede pegar `https://tu-api/r/{product_id}/{dominio}` como `href` en un botón real de `training-app` (o la que sea) y probar el flujo de punta a punta, aunque todo lo demás (checker, dashboard, docs públicas) todavía no exista.
 - **Listo cuando:** el link de un slot cargado a mano en Etapa 1 redirige correctamente desde un botón real de alguna app existente.
 
 ## Etapa 5 — Endpoints de escritura / administración
-- CRUD (`POST`/`PATCH`/`DELETE`) para `App`, `Product`, `ProductApp`, `Slot`, `SlotLink`.
+- CRUD (`POST`/`PATCH`/`DELETE`) para `Product` (incluye editar su array `apps`) y `Slot` (cada uno ya es un link + prioridad para un dominio).
 - Validación de los límites de caracteres de `01-solucion-final.md` §2.1 en la escritura (422 si se excede), texto plano forzado (rechazar HTML/Markdown).
 - **Listo cuando:** se puede dar de alta un producto completo (con sus slots y links) vía requests a la API, sin tocar la base de datos a mano.
 
@@ -64,10 +64,10 @@ Cada etapa es chica, verificable y deja el proyecto en un estado funcional — n
 
 ## Etapa 7 — Verificador de disponibilidad
 - Endpoint interno protegido (ej. `POST /internal/check`) que dispara el job.
-- **Mercado Libre:** `GET api.mercadolibre.com/items/{id}` por cada `SlotLink` activo, actualiza `status` según la respuesta.
+- **Mercado Libre:** `GET api.mercadolibre.com/items/{id}` por cada `Slot` activo, actualiza `status` según la respuesta.
 - **Amazon:** chequeo débil (HTTP status del link) marcado explícitamente como señal de alerta, no de verdad — ver limitación de acceso a la Creators API en `04-alcance-y-limitaciones.md`.
 - Umbral de fallos consecutivos antes de marcar `broken` (evita falsos positivos por caídas puntuales).
-- Al fallar un `SlotLink`, promueve el siguiente de la cola; si no queda ninguno, el `Slot` pasa a `unavailable`.
+- Al fallar un `Slot`, el próximo activo del mismo dominio ya responde solo (no hace falta "promover" nada); si no queda ninguno, ese dominio pasa a no disponible (agregado, se calcula al leer, no se guarda).
 - GitHub Actions con cron pegándole a `/internal/check` cada 12-24h.
 - **Listo cuando:** romper a propósito un link de prueba en Etapa 1 hace que, tras correr el check, el slot pase al siguiente candidato (o a `unavailable` si no hay más).
 
@@ -75,11 +75,13 @@ Cada etapa es chica, verificable y deja el proyecto en un estado funcional — n
 - Bot de Telegram, mensaje cuando un `Slot` pasa a `unavailable`.
 - **Listo cuando:** el escenario de prueba de Etapa 7 dispara un mensaje real al bot.
 
-## Etapa 9 — Dashboard (Next.js)
-- Login simple (API key → cookie de sesión).
-- Cliente TypeScript generado desde `/openapi.json` (mismo repo, sin publicar paquete — ver `03-stack-tecnologico.md` §3.6).
-- CRUD sobre las mismas entidades de Etapa 5, con vista prioritaria de "productos/slots en alerta".
-- **Listo cuando:** se puede dar de alta un producto completo desde el dashboard sin usar Postman.
+## Etapa 9 — Dashboard (Next.js + shadcn/ui)
+- Login simple (API key → cookie de sesión httpOnly, `apiFetch` server-only contra la API) — pantalla propia sin nav, formulario centrado sobre fondo blanco a modo de modal.
+- UI con **shadcn/ui** (Tailwind v4 + Radix UI) y tableros ordenables con `@tanstack/react-table`: Productos es un tablero (fila = producto, columna = atributo, con columna de acciones editar/borrar/ver detalle); dentro del detalle de un producto, sus Slots son otro tablero filtrado por ese producto, más un tablero global en `/slots` con todos los slots de todos los productos aclarando a cuál pertenece cada uno.
+- `/apps` es una vista de solo lectura derivada de `products.apps[]` (no hay entidad App, ver `01-solucion-final.md` §2), agrupando por nombre de app.
+- CRUD sobre las mismas entidades de Etapa 5 (sin `App`: los nombres de apps se editan como parte del producto).
+- El portal (`/productos`, `/apps`, `/slots`) usa un menú vertical oscuro fijo, con acceso a `/docs` en pestaña nueva y logout — separado del header de marketing (`/`) y del menú propio de `/docs`, para que cada área se lea como una entidad distinta aunque compartan el mismo Next.js.
+- **Listo cuando:** se puede dar de alta un producto completo desde el dashboard sin usar Postman, y las tablas de productos/slots se pueden ordenar por columna.
 
 ## Etapa 10 — Sitio de documentación (SEO/GEO) dentro del mismo Next.js
 - Páginas estáticas (SSG) generadas a partir del OpenAPI spec + contenido propio en Markdown.
@@ -91,7 +93,7 @@ Cada etapa es chica, verificable y deja el proyecto en un estado funcional — n
 - API a Fly.io/Railway con volumen persistente para SQLite + Litestream apuntando a un bucket.
 - Dashboard/docs (Next.js) a Vercel.
 - Cron de GitHub Actions apuntando a producción.
-- Monitoreo básico de uptime sobre `/r/{slot_id}` (single point of failure documentado en `04-alcance-y-limitaciones.md`).
+- Monitoreo básico de uptime sobre `/r/{product_id}/{dominio}` (single point of failure documentado en `04-alcance-y-limitaciones.md`).
 - **Listo cuando:** el flujo completo (botón real en una app → redirect → checker → dashboard) corre en producción, no solo en local.
 
 ## Fuera de este plan (a futuro, no ahora)

@@ -5,10 +5,9 @@ import { requireApiKey } from "./plugins/requireApiKey.js";
 import { productsRoutes } from "./routes/products.js";
 import { redirectRoutes } from "./routes/redirect.js";
 import { llmsRoutes } from "./routes/llms.js";
-import { adminAppsRoutes } from "./routes/admin/apps.js";
 import { adminProductsRoutes } from "./routes/admin/products.js";
 import { adminSlotsRoutes } from "./routes/admin/slots.js";
-import { adminSlotLinksRoutes } from "./routes/admin/slotLinks.js";
+import { adminCheckRoutes } from "./routes/admin/check.js";
 import { internalRoutes } from "./routes/internal.js";
 
 // Separado de server.ts (que además hace `listen`) para que los scripts de
@@ -46,7 +45,7 @@ export async function buildApp() {
       tags: [
         { name: "productos", description: "Lectura de productos y sus slots (consumido por las apps)." },
         { name: "redirect", description: "Endpoint público que va en el botón de compra." },
-        { name: "admin", description: "Alta/edición/baja de Apps, Products, Slots y SlotLinks." },
+        { name: "admin", description: "Alta/edición/baja de Products y Slots." },
       ],
     },
   });
@@ -73,10 +72,9 @@ export async function buildApp() {
   await app.register(
     async (admin) => {
       admin.addHook("onRequest", requireApiKey);
-      await admin.register(adminAppsRoutes);
       await admin.register(adminProductsRoutes);
       await admin.register(adminSlotsRoutes);
-      await admin.register(adminSlotLinksRoutes);
+      await admin.register(adminCheckRoutes);
     },
     { prefix: "/admin" },
   );

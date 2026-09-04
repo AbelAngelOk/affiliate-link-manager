@@ -1,6 +1,7 @@
-import "server-only";
-
-const API_BASE_URL = process.env.API_BASE_URL ?? "http://localhost:3000";
+// Sin "server-only": estas son funciones puras de formateo, las usa tanto
+// app/docs/page.tsx (Server Component) como app/docs/DocsSidebar.tsx (Client
+// Component, necesita estado para expandir/colapsar secciones). El fetch
+// real del spec vive aparte en lib/openapiServer.ts, ese sí server-only.
 
 export type OpenApiOperation = {
   method: string;
@@ -13,15 +14,31 @@ export type OpenApiOperation = {
 export type OpenApiSpec = {
   info: { title: string; description?: string; version: string };
   paths: Record<string, Record<string, { summary?: string; tags?: string[] }>>;
+  tags?: Array<{ name: string; description?: string }>;
 };
 
-// Público, sin cookie: es la misma spec que sirve /openapi.json en la API
-// (ver 03-stack-tecnologico.md §3.4) — nunca se escribe a mano acá, siempre
-// se lee de la fuente autogenerada por Fastify.
-export async function fetchOpenApiSpec(): Promise<OpenApiSpec> {
-  const res = await fetch(`${API_BASE_URL}/openapi.json`, { next: { revalidate: 300 } });
-  if (!res.ok) throw new Error(`No se pudo leer /openapi.json (${res.status})`);
-  return res.json();
+// Orden de lectura preferido para el menú (ver app.ts): lo que un integrador
+// usa primero (leer productos, redirigir) antes que la parte de gestión.
+const TAG_ORDER = ["productos", "redirect", "admin"];
+
+export function sortTags(tagNames: string[]): string[] {
+  return [...tagNames].sort((a, b) => {
+    const ia = TAG_ORDER.indexOf(a);
+    const ib = TAG_ORDER.indexOf(b);
+    return (ia === -1 ? TAG_ORDER.length : ia) - (ib === -1 ? TAG_ORDER.length : ib);
+  });
+}
+
+export function tagDescription(spec: OpenApiSpec, tag: string): string | undefined {
+  return spec.tags?.find((t) => t.name === tag)?.description;
+}
+
+// Los path params ("{id}") y las barras no son seguros como fragmento de URL
+// sin escapar — se limpian acá para que el ancla del menú y el id de la
+// sección siempre coincidan con algo navegable.
+export function operationAnchor(op: Pick<OpenApiOperation, "method" | "path">): string {
+  const cleanPath = op.path.replace(/[{}]/g, "").replace(/\//g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  return `${op.method.toLowerCase()}-${cleanPath}`;
 }
 
 export function listOperations(spec: OpenApiSpec): OpenApiOperation[] {

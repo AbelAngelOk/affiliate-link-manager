@@ -1,76 +1,9 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ff2fdb46-9308-4f3d-a45b-634ca13ccfce",
+  "id": "0d2dafec-d580-4216-8edd-20733e89d220",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
-    "apps": {
-      "name": "apps",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "owner_user_id": {
-          "name": "owner_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "nombre": {
-          "name": "nombre",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "bundle_id": {
-          "name": "bundle_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "activo": {
-          "name": "activo",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "apps_owner_user_id_users_id_fk": {
-          "name": "apps_owner_user_id_users_id_fk",
-          "tableFrom": "apps",
-          "tableTo": "users",
-          "columnsFrom": [
-            "owner_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "check_logs": {
       "name": "check_logs",
       "columns": {
@@ -81,8 +14,8 @@
           "notNull": true,
           "autoincrement": false
         },
-        "slot_link_id": {
-          "name": "slot_link_id",
+        "slot_id": {
+          "name": "slot_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -112,12 +45,12 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "check_logs_slot_link_id_slot_links_id_fk": {
-          "name": "check_logs_slot_link_id_slot_links_id_fk",
+        "check_logs_slot_id_slots_id_fk": {
+          "name": "check_logs_slot_id_slots_id_fk",
           "tableFrom": "check_logs",
-          "tableTo": "slot_links",
+          "tableTo": "slots",
           "columnsFrom": [
-            "slot_link_id"
+            "slot_id"
           ],
           "columnsTo": [
             "id"
@@ -127,65 +60,6 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "product_apps": {
-      "name": "product_apps",
-      "columns": {
-        "product_id": {
-          "name": "product_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "app_id": {
-          "name": "app_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "product_apps_product_id_products_id_fk": {
-          "name": "product_apps_product_id_products_id_fk",
-          "tableFrom": "product_apps",
-          "tableTo": "products",
-          "columnsFrom": [
-            "product_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "product_apps_app_id_apps_id_fk": {
-          "name": "product_apps_app_id_apps_id_fk",
-          "tableFrom": "product_apps",
-          "tableTo": "apps",
-          "columnsFrom": [
-            "app_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "product_apps_product_id_app_id_pk": {
-          "columns": [
-            "product_id",
-            "app_id"
-          ],
-          "name": "product_apps_product_id_app_id_pk"
-        }
-      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
@@ -248,6 +122,14 @@
           "notNull": true,
           "autoincrement": false
         },
+        "apps": {
+          "name": "apps",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -276,8 +158,8 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "slot_links": {
-      "name": "slot_links",
+    "slots": {
+      "name": "slots",
       "columns": {
         "id": {
           "name": "id",
@@ -286,8 +168,15 @@
           "notNull": true,
           "autoincrement": false
         },
-        "slot_id": {
-          "name": "slot_id",
+        "product_id": {
+          "name": "product_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "dominio": {
+          "name": "dominio",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -338,80 +227,13 @@
           "autoincrement": false
         }
       },
-      "indexes": {},
-      "foreignKeys": {
-        "slot_links_slot_id_slots_id_fk": {
-          "name": "slot_links_slot_id_slots_id_fk",
-          "tableFrom": "slot_links",
-          "tableTo": "slots",
-          "columnsFrom": [
-            "slot_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "slots": {
-      "name": "slots",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "product_id": {
-          "name": "product_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "provider": {
-          "name": "provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "country": {
-          "name": "country",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'checking'"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
       "indexes": {
-        "slots_product_id_provider_country_unique": {
-          "name": "slots_product_id_provider_country_unique",
+        "slots_product_id_dominio_priority_unique": {
+          "name": "slots_product_id_dominio_priority_unique",
           "columns": [
             "product_id",
-            "provider",
-            "country"
+            "dominio",
+            "priority"
           ],
           "isUnique": true
         }

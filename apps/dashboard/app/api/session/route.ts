@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Falta la API key" }, { status: 400 });
   }
 
-  const check = await fetch(`${API_BASE_URL}/admin/apps`, {
+  const check = await fetch(`${API_BASE_URL}/admin/products`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
   if (!check.ok) {

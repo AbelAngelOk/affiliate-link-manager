@@ -1,4 +1,5 @@
-import { sqliteTable, text, integer, primaryKey, unique } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+import { sqliteTable, text, integer, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 const id = () =>
   text("id")
@@ -20,20 +21,16 @@ export const users = sqliteTable("users", {
   ...timestamps,
 });
 
-export const apps = sqliteTable("apps", {
-  id: id(),
-  ownerUserId: text("owner_user_id")
-    .notNull()
-    .references(() => users.id),
-  nombre: text("nombre").notNull(),
-  bundleId: text("bundle_id").notNull(),
-  activo: integer("activo", { mode: "boolean" }).notNull().default(true),
-  ...timestamps,
-});
-
 // Límites de longitud documentados en 01-solucion-final.md §2.1.
 // Se enforcean en la capa de validación de escritura (Etapa 5, zod),
 // no como CHECK de SQLite, para poder dar mensajes de error claros.
+//
+// No existe una entidad App separada: no hace falta más que el nombre de la
+// app para identificarla, así que "apps" es directamente un atributo del
+// producto (lista de nombres) en vez de una tabla + join N:N. Un producto
+// puede seguir asociado a más de una app (es un array), solo que ya no hay
+// ningún otro dato de la app (id propio, bundle_id, etc.) que justifique una
+// tabla aparte.
 export const products = sqliteTable("products", {
   id: id(),
   ownerUserId: text("owner_user_id")
@@ -45,24 +42,23 @@ export const products = sqliteTable("products", {
   imagenUrl: text("imagen_url").notNull(),
   imagenAlt: text("imagen_alt"), // máx 125, opcional
   categoria: text("categoria").notNull(), // máx 40
+  apps: text("apps", { mode: "json" }).notNull().$type<string[]>().default([]),
   ...timestamps,
 });
 
-// N:N producto <-> app
-export const productApps = sqliteTable(
-  "product_apps",
-  {
-    productId: text("product_id")
-      .notNull()
-      .references(() => products.id, { onDelete: "cascade" }),
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id, { onDelete: "cascade" }),
-  },
-  (t) => ({ pk: primaryKey({ columns: [t.productId, t.appId] }) }),
-);
-
-// Slot = producto + proveedor + país (ver 01-solucion-final.md §2)
+// Slot = un único link candidato para un producto+dominio, con su prioridad.
+// Fusiona lo que antes eran dos tablas (Slot = canal, SlotLink = cola de
+// candidatos dentro del canal): ahora el "canal" (ej. amazon.com.mx) no es
+// una fila propia, es el valor repetido de `dominio` entre varias filas de
+// `slots` del mismo producto — la cola de fallback es, directamente, "todas
+// las filas con el mismo product_id + dominio", ordenadas por priority.
+//
+// `dominio` reemplaza los campos separados `provider` + `country`: en la
+// práctica cada canal ya es un dominio real (amazon.com.mx,
+// mercadolibre.com.ar, etc.), así que unificarlos evita cargar dos atributos
+// para expresar una sola cosa. El proveedor (para decidir qué estrategia de
+// verificación usar, ver checker/runCheck.ts) se infiere del propio dominio
+// en vez de guardarse aparte.
 export const slots = sqliteTable(
   "slots",
   {
@@ -70,38 +66,33 @@ export const slots = sqliteTable(
     productId: text("product_id")
       .notNull()
       .references(() => products.id, { onDelete: "cascade" }),
-    provider: text("provider", { enum: ["amazon", "mercadolibre"] }).notNull(),
-    country: text("country").notNull(),
+    dominio: text("dominio").notNull(), // ej. "amazon.com.mx", "mercadolibre.com.ar"
+    affiliateUrl: text("affiliate_url").notNull(),
+    priority: integer("priority").notNull().default(0), // menor número = mayor prioridad dentro del mismo dominio
     // Optimista: un slot nuevo arranca "active" (el admin acaba de cargar un
     // link que presumiblemente probó a mano) y el verificador (Etapa 7) lo
-    // pasa a "unavailable" si más adelante deja de funcionar.
-    status: text("status", { enum: ["active", "unavailable", "checking"] })
-      .notNull()
-      .default("active"),
+    // pasa a "broken" si más adelante deja de funcionar.
+    status: text("status", { enum: ["active", "broken"] }).notNull().default("active"),
+    lastCheckedAt: integer("last_checked_at", { mode: "timestamp" }),
+    lastOkAt: integer("last_ok_at", { mode: "timestamp" }),
     ...timestamps,
   },
-  (t) => ({ productProviderCountry: unique().on(t.productId, t.provider, t.country) }),
+  (t) => ({
+    // Único parcial: la prioridad solo tiene que ser irrepetible entre los
+    // slots ACTIVOS de un mismo producto+dominio. Un slot roto no "reserva"
+    // su número para siempre — un candidato nuevo puede reusarlo apenas el
+    // roto deja de contar (ver 01-solucion-final.md §2, sección de prioridad).
+    activeDominioPriority: uniqueIndex("slots_active_dominio_priority")
+      .on(t.productId, t.dominio, t.priority)
+      .where(sql`${t.status} = 'active'`),
+  }),
 );
 
-// Cola ordenada de links candidatos dentro de un slot.
-export const slotLinks = sqliteTable("slot_links", {
+export const checkLogs = sqliteTable("check_logs", {
   id: id(),
   slotId: text("slot_id")
     .notNull()
     .references(() => slots.id, { onDelete: "cascade" }),
-  affiliateUrl: text("affiliate_url").notNull(),
-  priority: integer("priority").notNull().default(0), // menor número = mayor prioridad
-  status: text("status", { enum: ["active", "broken"] }).notNull().default("active"),
-  lastCheckedAt: integer("last_checked_at", { mode: "timestamp" }),
-  lastOkAt: integer("last_ok_at", { mode: "timestamp" }),
-  ...timestamps,
-});
-
-export const checkLogs = sqliteTable("check_logs", {
-  id: id(),
-  slotLinkId: text("slot_link_id")
-    .notNull()
-    .references(() => slotLinks.id, { onDelete: "cascade" }),
   checkedAt: integer("checked_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),

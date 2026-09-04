@@ -8,39 +8,34 @@ Puntos nuevos que agrega el usuario y cómo se resuelven:
 
 | Requerimiento | Resolución en el modelo |
 |---|---|
-| Acceso por OAuth, cada usuario ve solo su entorno | Todo recurso (`App`, `Product`) pertenece a un `owner_user_id`; el token OAuth trae ese `user_id` y todas las queries se filtran automáticamente por él |
-| Un producto puede estar en más de una app | Relación N:N `Product ↔ App` |
-| Un producto puede estar en Amazon, Mercado Libre o ambos; Amazon se divide por país | El producto tiene N `Slot`, cada uno con `provider` (amazon/mercadolibre) + `country` |
-| Filtrar productos por app | `GET /v1/products?app_id=...` |
-| Filtrar links de Amazon por país | `GET /v1/products/{id}/slots?provider=amazon&country=mx` |
-| Producto visible si tiene algún link disponible (Amazon o ML) | El producto es visible si tiene ≥1 `Slot` con `status = active`, sin importar cuál |
-| Usuario arma sus propios botones (uno por Amazon, uno por ML) | La API expone los slots ya separados por provider/country; el `cta_url` de cada slot es independiente, el usuario decide qué slot usa en qué botón dentro de su app |
-| Slot: si el link no funciona, pasa al próximo | Cada `Slot` tiene una cola ordenada de `SlotLink` (candidatos); si el vigente falla, se promueve el siguiente de la misma cola (mismo provider+country) |
-| Si no hay links disponibles, debe devolver un status code | `GET /r/{slot_id}` devuelve `410 Gone` cuando el slot no tiene ningún `SlotLink` activo |
+| Acceso por OAuth, cada usuario ve solo su entorno | Todo recurso (`Product`) pertenece a un `owner_user_id`; el token OAuth trae ese `user_id` y todas las queries se filtran automáticamente por él |
+| Un producto puede estar en más de una app | `Product.apps` es un array de nombres — no hay entidad `App` propia (ver nota en §2) |
+| Un producto puede estar en Amazon, Mercado Libre o ambos; Amazon se divide por país | El producto tiene N `Slot`, cada uno con un `dominio` (ej. `amazon.com.mx`, `mercadolibre.com.ar` — fusiona proveedor+país, ver §2) |
+| Filtrar productos por app | `GET /v1/products?app=nombre` |
+| Filtrar links de Amazon por país | `GET /v1/products/{id}/slots?dominio=amazon.com.mx` |
+| Producto visible si tiene algún link disponible (Amazon o ML) | El producto es visible si tiene ≥1 `Slot` con `status = active` en cualquier dominio |
+| Usuario arma sus propios botones (uno por Amazon, uno por ML) | La API expone los dominios ya agrupados; el `cta_url` de cada dominio es independiente, el usuario decide qué dominio usa en qué botón dentro de su app |
+| Slot: si el link no funciona, pasa al próximo | Un `Slot` es un único link + prioridad; varios `Slot` pueden compartir el mismo `dominio` — forman la cola de fallback de ese canal, ordenada por `priority` |
+| Si no hay links disponibles, debe devolver un status code | `GET /r/{product_id}/{dominio}` devuelve `410 Gone` cuando ese dominio no tiene ningún `Slot` activo |
 
 ## 2. Modelo de datos
 
 ```
 User          (id, email, oauth_subject)
-App           (id, owner_user_id, nombre, bundle_id/dominio, activo)
 Product       (id, owner_user_id, titulo[80], descripcion_corta[160],
                descripcion_larga[500]?, imagen_url, imagen_alt[125]?,
-               categoria[40])
-ProductApp    (product_id, app_id)                       -- N:N producto↔app
-Slot          (id, product_id, provider [amazon|mercadolibre],
-               country,  -- amazon: us/mx/br/es/... (marketplaces reales, ver doc 2)
-                         -- mercadolibre: ar/mx/br/... (sitio ML del país)
-               status [active|unavailable|checking])
-SlotLink      (id, slot_id, affiliate_url, priority, status [active|broken],
-               last_checked_at, last_ok_at)
-CheckLog      (id, slot_link_id, checked_at, resultado, detalle)
+               categoria[40], apps[])
+Slot          (id, product_id, dominio, affiliate_url, priority,
+               status [active|broken], last_checked_at, last_ok_at)
+CheckLog      (id, slot_id, checked_at, resultado, detalle)
 ```
 
 Notas clave:
-- **`Slot` = producto + proveedor + país.** Un mismo producto puede tener, por ejemplo, 4 slots simultáneos: `amazon:mx`, `amazon:us`, `mercadolibre:ar`, `mercadolibre:mx`.
-- **`SlotLink` es la cola interna de un slot.** No se "edita" el link de un slot — se agregan `SlotLink` con prioridad, y el slot siempre sirve el de mayor prioridad con `status = active`. Esto es lo que resuelve "si el link no funciona pasa al próximo" sin mezclar proveedores entre sí (a diferencia de la v1 de este documento, acá el fallback es *dentro* del mismo canal, no salta de Amazon a Mercado Libre automáticamente — ese salto lo decide el usuario mostrando/ocultando botones según qué slots estén activos).
-- Un `Slot` sin ningún `SlotLink` activo pasa a `status = unavailable`. El producto sigue existiendo y sigue siendo consultable mientras tenga **al menos un** slot activo entre todos los suyos.
-- **Un slot nuevo arranca en `status = active` (default optimista):** se asume que el admin cargó un link que ya probó a mano; recién el verificador periódico (§5) lo degrada a `unavailable` si más adelante deja de funcionar. La alternativa (arrancar en un estado intermedio tipo `checking` hasta la primera corrida del verificador) deja el slot invisible para las apps hasta la próxima corrida del job, sin ganar nada a cambio — se descartó tras probarlo.
+- **No hay entidad `App` separada.** De una app solo hace falta el nombre para identificarla (funciona como su propio id), así que "en qué apps se muestra un producto" es directamente un atributo del producto (`apps`, un array de nombres) en vez de una tabla `App` + join N:N `ProductApp`. Sigue siendo N:N en la práctica (un producto puede listar varias apps), solo que sin una tabla intermedia — a esta escala (unas pocas apps por usuario) es una simplificación real, no una pérdida de capacidad. `GET /v1/products?app=nombre` filtra por ese array.
+- **`Slot` = un único link + prioridad.** Ya no es "canal + cola de candidatos" en dos tablas — cada fila de `Slot` es directamente un link candidato. Varias filas pueden compartir el mismo `product_id` + `dominio`: esas filas *son* la cola de fallback de ese canal, ordenada por `priority` (menor número = mayor prioridad). No hace falta una tabla intermedia para expresar "candidatos de un mismo canal" — el propio `dominio` repetido cumple ese rol, y el `redirect` (§4) resuelve "cuál sirvo ahora" con un simple `WHERE product_id=X AND dominio=Y AND status='active' ORDER BY priority LIMIT 1`.
+- **`dominio` reemplaza `provider` + `country`.** En vez de dos campos (`provider: amazon|mercadolibre`, `country: mx|us|ar...`), un solo campo con el dominio real del canal (`amazon.com.mx`, `amazon.com`, `mercadolibre.com.ar`, `mercadolibre.com.mx`...). Es más directo — cada canal ya *es* un dominio real — y evita cargar dos atributos para expresar una sola cosa. El proveedor (para decidir la estrategia de verificación, ver §5) se infiere del propio string (`dominio.includes("mercadolibre")`) en vez de guardarse aparte.
+- **No hay `status = unavailable` a nivel de fila.** Cada `Slot` es `active` o `broken` (es un link puntual, no un canal). "Este dominio no tiene nada disponible" es un estado *agregado*, calculado al leer (¿queda algún `Slot` `active` para ese `product_id` + `dominio`?), no algo que se guarda — evita mantener dos fuentes de verdad sincronizadas.
+- **Un slot nuevo arranca en `status = active` (default optimista):** se asume que el admin cargó un link que ya probó a mano; recién el verificador periódico (§5) lo degrada a `broken` si más adelante deja de funcionar. La alternativa (arrancar en un estado intermedio tipo `checking` hasta la primera corrida del verificador) deja el slot invisible para las apps hasta la próxima corrida del job, sin ganar nada a cambio — se descartó tras probarlo.
 
 ### 2.1 Límites de longitud en los campos de producto
 
@@ -57,75 +52,72 @@ El problema concreto que resuelve esto: un mismo `Product` puede consultarse des
 Reglas adicionales:
 - **Los campos de texto son texto plano, sin HTML ni Markdown.** Si se permitiera formato, dos apps con soporte de renderizado distinto (una interpreta Markdown, otra no) volverían a generar el mismo tipo de desface que se busca evitar con los límites de longitud.
 - **La validación ocurre al escribir, no al leer.** El endpoint de alta/edición de producto (usado por el panel) rechaza con `422` cualquier campo que exceda su límite — así la garantía es "todo lo que devuelve la API ya cumple el límite", y ninguna app consumidora necesita truncar defensivamente (aunque hacerlo con `text-overflow: ellipsis` como resguardo extra no está de más).
-- Estos límites son **por producto**, no por app: se definió el número pensando en el caso más chico (mobile), para que sirva razonablemente bien en cualquier layout más grande. Si en el futuro una app puntual necesitara un texto distinto al mismo producto (ej. una versión todavía más corta), la extensión natural sería agregar un override opcional en `ProductApp` (`titulo_override`) — no está en esta versión porque no hay un caso real que lo necesite todavía.
+- Estos límites son **por producto**, no por app: se definió el número pensando en el caso más chico (mobile), para que sirva razonablemente bien en cualquier layout más grande. Si en el futuro una app puntual necesitara un texto distinto al mismo producto (ej. una versión todavía más corta), la extensión natural sería agregar un campo opcional tipo `titulo_override` — no está en esta versión porque no hay un caso real que lo necesite todavía.
+
+### 2.2 Reglas de prioridad dentro de un dominio
+
+- **Única solo entre slots activos.** El índice único es `(product_id, dominio, priority) WHERE status = 'active'` — no sobre todas las filas. Un slot `broken` no "reserva" su número para siempre: apenas deja de contar, un candidato nuevo puede reusar esa misma prioridad sin conflicto. Antes de este cambio la unicidad era global, y un slot roto bloqueaba ese número indefinidamente aunque ya no compitiera por nada.
+- **No hace falta que la secuencia sea densa.** Cuando un slot se rompe, se queda con su número tal cual (no se renumeran los demás) — el redirect (§4) siempre resuelve "cuál sirvo ahora" con `ORDER BY priority ASC LIMIT 1 WHERE status='active'`, que funciona igual de bien con huecos (0, 2, 7) que con una secuencia perfecta (0, 1, 2). Renumerar en cada rotura significaría updates en cadena sobre el resto de la cola en cada corrida del verificador, y volvería inestable un número que alguien puede estar mirando en el panel — complejidad real sin ninguna ganancia funcional.
+- **Insertar-y-empujar, no error, si se pide una prioridad activa ya ocupada.** Si al crear o editar un slot se indica una prioridad que ya tiene otro slot *activo* del mismo dominio, en vez de devolver `409` el sistema corre un lugar a ese y a los siguientes de la cola (todos +1, empezando por el de mayor número para no chocar consigo mismos a mitad de camino). Sin prioridad explícita, se sigue asignando automáticamente "el último de la cola" (`max` de todo lo que existió alguna vez en ese dominio + 1, activo o roto — para que un número de prioridad nunca quede referido a dos links distintos con el tiempo).
+- **Caso límite: un slot roto que se autorepara puede encontrar su lugar viejo ocupado.** Si mientras estaba `broken` otro slot activo tomó su misma prioridad, al volver a `active` no puede reclamar ese número — se le asigna uno nuevo al final de la cola en vez de romper el índice único.
 
 ## 3. Autenticación y aislamiento por entorno
 
 **Decisión para esta versión: arranca single-tenant.** Confirmado que por ahora hay un solo usuario real (vos) administrando todas las apps, así que implementar el flujo OAuth completo (Client Credentials, emisión de tokens, etc.) sería complejidad sin beneficio inmediato. Se resuelve así:
 
 - **v1 (ahora):** autenticación con una **API key estática** (un solo secreto, generado una vez, usado en el header `Authorization`). No hay noción real de "múltiples entornos" corriendo todavía.
-- **El modelo de datos sí conserva `owner_user_id`** en `App` y `Product` desde el día uno, apuntando a una única fila `User` fija (la tuya). Esto es deliberado: agregar esa columna después, con datos ya cargados, es una migración incómoda (hay que retro-completarla en cada fila existente); dejarla desde el principio con un solo valor posible cuesta cero y evita ese trabajo futuro.
-- **Migración a multi-tenant (cuando escale):** el día que haga falta un segundo entorno real, el cambio es solo en la capa de autenticación — reemplazar la API key estática por el flujo OAuth2 Client Credentials descrito en la v1 de este documento (emitir JWT con `sub=user_id`, permitir múltiples filas en `User`, exponer un alta de usuario/cliente). El modelo de datos (`App`, `Product`, `Slot`, `SlotLink`) no cambia — ya está preparado para filtrar por `owner_user_id` en cada query desde ahora, aunque hoy ese filtro siempre resuelva al mismo usuario. Esto queda documentado como deuda técnica planeada, no como algo a construir ahora (ver `04-alcance-y-limitaciones.md`).
+- **El modelo de datos sí conserva `owner_user_id`** en `Product` desde el día uno, apuntando a una única fila `User` fija (la tuya). Esto es deliberado: agregar esa columna después, con datos ya cargados, es una migración incómoda (hay que retro-completarla en cada fila existente); dejarla desde el principio con un solo valor posible cuesta cero y evita ese trabajo futuro.
+- **Migración a multi-tenant (cuando escale):** el día que haga falta un segundo entorno real, el cambio es solo en la capa de autenticación — reemplazar la API key estática por el flujo OAuth2 Client Credentials descrito en la v1 de este documento (emitir JWT con `sub=user_id`, permitir múltiples filas en `User`, exponer un alta de usuario/cliente). El modelo de datos (`Product`, `Slot`) no cambia — ya está preparado para filtrar por `owner_user_id` en cada query desde ahora, aunque hoy ese filtro siempre resuelva al mismo usuario. Esto queda documentado como deuda técnica planeada, no como algo a construir ahora (ver `04-alcance-y-limitaciones.md`).
 
 ## 4. Endpoints
 
-**Listar productos de una app, con sus slots:**
+**Listar productos de una app, con sus dominios:**
 ```
-GET /v1/products?app_id={app_id}
+GET /v1/products?app={nombre}
 Authorization: Bearer <api_key>   -- v1: API key estática. Ver §3 para el plan de migración a OAuth.
 
 → [{
      id, titulo, imagen_url,
      slots: [
-       { slot_id, provider: "amazon", country: "mx", status: "active", cta_url: "/r/slot_abc" },
-       { slot_id, provider: "mercadolibre", country: "ar", status: "active", cta_url: "/r/slot_def" }
+       { dominio: "amazon.com.mx", status: "active", cta_url: "/r/{product_id}/amazon.com.mx" },
+       { dominio: "mercadolibre.com.ar", status: "active", cta_url: "/r/{product_id}/mercadolibre.com.ar" }
      ]
    }, ...]
 ```
-Solo devuelve productos con `owner_user_id = token.sub` y asociados a ese `app_id` (vía `ProductApp`). Por defecto solo incluye slots con `status = active`, pero admite `?include_unavailable=true` para el panel de admin.
+Solo devuelve productos con `owner_user_id = token.sub` cuyo array `apps` incluya ese `nombre`. Los `Slot` (candidatos) de cada producto se agrupan por `dominio`: cada entrada de `slots` es un dominio, con `status = "active"` si le queda al menos un `Slot` activo. Por defecto solo incluye dominios activos, pero admite `?include_unavailable=true` para el panel de admin.
 
-**Filtrar slots de un producto puntual (para armar un botón específico):**
+**Filtrar dominios de un producto puntual (para armar un botón específico):**
 ```
-GET /v1/products/{product_id}/slots?provider=amazon&country=mx
-GET /v1/products/{product_id}/slots?provider=mercadolibre
+GET /v1/products/{product_id}/slots?dominio=amazon.com.mx
 ```
 Así el usuario arma en su app "un botón de Amazon" y "un botón de Mercado Libre" con una sola llamada filtrada cada uno, sin tener que parsear todo el array.
 
 **Redirección (lo que va en el `href` del botón):**
 ```
-GET /r/{slot_id}
-→ 302 a la affiliate_url del SlotLink activo de mayor prioridad
-→ 410 Gone si el slot no tiene ningún SlotLink activo
+GET /r/{product_id}/{dominio}
+→ 302 a la affiliate_url del Slot activo de mayor prioridad para ese dominio
+→ 410 Gone si ese dominio no tiene ningún Slot activo
 ```
-El redirect **no** valida el link en el momento del click (eso sería lento y machacaría a Amazon/ML por cada click real). Confía en el último estado calculado por el verificador periódico (doc 1 §5). El código 410 (no 404) se elige deliberadamente: significa "existió y ya no está disponible", útil para que la app decida ocultar el botón en vez de tratarlo como un error genérico.
+La clave es `product_id` + `dominio`, no el id de un `Slot` puntual — así la URL del botón queda estable en el tiempo aunque el candidato "vigente" cambie (se rompa uno y se promueva el siguiente de la cola). El redirect **no** valida el link en el momento del click (eso sería lento y machacaría a Amazon/ML por cada click real). Confía en el último estado calculado por el verificador periódico (§5). El código 410 (no 404) se elige deliberadamente: significa "existió y ya no está disponible", útil para que la app decida ocultar el botón en vez de tratarlo como un error genérico.
 
-## 5. Verificador de disponibilidad (sin cambios de fondo respecto a v1)
+## 5. Verificador de disponibilidad
 
-Corre periódicamente por cada `SlotLink` con `status = active`:
-- **Mercado Libre:** `GET api.mercadolibre.com/items/{item_id}` (extraído de la URL), revisa `status`.
-- **Amazon:** vía Creators API si la cuenta tiene acceso (ver doc 2/4 — limitación real al arrancar), o señal débil de HTTP como alerta.
-- Si un `SlotLink` falla de forma sostenida (no en el primer intento, para evitar falsos positivos), pasa a `broken` y se promueve el siguiente `SlotLink` del mismo `Slot`. Si no queda ninguno, el `Slot` completo pasa a `unavailable` y se dispara una notificación al usuario.
+Corre periódicamente por cada `Slot` con `status = active`:
+- **Mercado Libre** (`dominio` contiene "mercadolibre"): `GET api.mercadolibre.com/items/{item_id}` (extraído de la URL), revisa `status`.
+- **Amazon** (o Mercado Libre cuando no se pudo extraer el item_id de la URL): vía Creators API si la cuenta tiene acceso (ver doc 2/4 — limitación real al arrancar), o señal débil de HTTP como alerta.
+- Si un `Slot` falla de forma sostenida (no en el primer intento, para evitar falsos positivos), pasa a `broken`. Como el fallback ya no es una promoción explícita sino simplemente "el próximo `Slot` activo del mismo dominio, ordenado por priority", no hace falta ningún paso adicional para que tome su lugar. Si tras eso no queda ningún `Slot` activo para ese `product_id` + `dominio`, se dispara una notificación al usuario.
 
 ## 6. Diagrama — estructura de datos
 
 ```mermaid
 erDiagram
-    USER ||--o{ APP : posee
     USER ||--o{ PRODUCT : posee
-    PRODUCT }o--o{ APP : "product_app (N:N)"
-    PRODUCT ||--o{ SLOT : tiene
-    SLOT ||--o{ SLOT_LINK : "cola ordenada por prioridad"
+    PRODUCT ||--o{ SLOT : "tiene (varios slots pueden compartir dominio = cola de fallback)"
 
     USER {
         uuid id
         string email
         string oauth_subject
-    }
-    APP {
-        uuid id
-        uuid owner_user_id
-        string nombre
-        string bundle_id
     }
     PRODUCT {
         uuid id
@@ -133,19 +125,14 @@ erDiagram
         string titulo
         string imagen_url
         string categoria
+        string_array apps "nombres de app, sin entidad propia"
     }
     SLOT {
         uuid id
         uuid product_id
-        enum provider "amazon | mercadolibre"
-        string country "mx, us, br, es (amazon) / ar, mx, br (ML)"
-        enum status "active | unavailable | checking"
-    }
-    SLOT_LINK {
-        uuid id
-        uuid slot_id
+        string dominio "ej. amazon.com.mx, mercadolibre.com.ar — reemplaza provider+country"
         string affiliate_url
-        int priority
+        int priority "menor = mayor prioridad dentro del mismo dominio"
         enum status "active | broken"
         datetime last_checked_at
     }
@@ -155,17 +142,17 @@ erDiagram
 
 ```mermaid
 flowchart TD
-    A["App llama GET /v1/products?app_id=X\n(token OAuth del usuario)"] --> B["API devuelve productos\ncon sus slots activos"]
-    B --> C{"El usuario arma los botones\nde su app filtrando por provider/country"}
-    C -->|"Botón Amazon"| D["href = /r/slot_amazon_mx"]
-    C -->|"Botón Mercado Libre"| E["href = /r/slot_ml_ar"]
-    D --> F{"¿Slot tiene SlotLink\ncon status=active?"}
+    A["App llama GET /v1/products?app=X\n(token OAuth del usuario)"] --> B["API devuelve productos\ncon sus dominios activos"]
+    B --> C{"El usuario arma los botones\nde su app filtrando por dominio"}
+    C -->|"Botón Amazon"| D["href = /r/{product_id}/amazon.com.mx"]
+    C -->|"Botón Mercado Libre"| E["href = /r/{product_id}/mercadolibre.com.ar"]
+    D --> F{"¿Queda algún Slot\nstatus=active para ese dominio?"}
     E --> F
-    F -->|"Sí"| G["302 → affiliate_url vigente"]
-    F -->|"No queda ninguno activo"| H["410 Gone\n→ la app oculta ese botón puntual"]
+    F -->|"Sí"| G["302 → affiliate_url del de mayor prioridad"]
+    F -->|"No"| H["410 Gone\n→ la app oculta ese botón puntual"]
 
-    I["Job periódico"] -.->|"detecta SlotLink roto"| J["Promueve siguiente SlotLink\nde la misma cola (mismo provider+country)"]
-    J -.->|"si no queda ninguno"| K["Slot → unavailable\n+ notificación al usuario"]
+    I["Job periódico"] -.->|"marca un Slot broken"| J["El próximo Slot activo\ndel mismo dominio ya responde\n(no hace falta 'promover' nada)"]
+    J -.->|"si no queda ninguno activo\npara ese dominio"| K["410 en el redirect\n+ notificación al usuario"]
 ```
 
 ## 8. Qué decide el usuario vs. qué decide la API
@@ -173,4 +160,4 @@ flowchart TD
 Para que quede explícito, porque es la parte que "corre por parte de él" (como aclaraste):
 
 - **La API decide:** si un slot está disponible o no, y a qué URL redirige en cada momento.
-- **El usuario decide:** qué slots existen para cada producto (cuántos países/proveedores carga), y qué botón de su app usa cada slot. La API nunca elige automáticamente "mostrar Amazon en vez de Mercado Libre" — solo informa qué está disponible; la composición visual y la prioridad entre proveedores queda del lado de la app consumidora.
+- **El usuario decide:** qué dominios existen para cada producto (cuántos países/proveedores carga) y con qué prioridad dentro de cada uno, y qué botón de su app usa cada dominio. La API nunca elige automáticamente "mostrar Amazon en vez de Mercado Libre" — solo informa qué está disponible; la composición visual y la prioridad entre proveedores queda del lado de la app consumidora.

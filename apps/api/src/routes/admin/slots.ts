@@ -1,24 +1,39 @@
 import type { FastifyInstance } from "fastify";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "../../db/client.js";
-import { products, slotLinks, slots } from "../../db/schema.js";
+import { products, slots } from "../../db/schema.js";
 import { getCurrentUserId } from "../../auth/currentUser.js";
+import { isActivePriorityTaken, makeRoomForPriority, nextPriorityFor } from "../../db/priority.js";
 
-type CreateSlotBody = { provider: "amazon" | "mercadolibre"; country: string };
+const plainText = (maxLength: number, minLength = 1) => ({
+  type: "string",
+  minLength,
+  maxLength,
+  pattern: "^[^<>]*$",
+});
+
+// Dominio real del canal (ej. "amazon.com.mx", "mercadolibre.com.ar") — ver
+// db/schema.ts para por qué esto reemplaza a provider+country.
+const dominioSchema = plainText(60, 3);
+
+type CreateSlotBody = { dominio: string; affiliate_url: string; priority?: number };
+type PatchSlotBody = Partial<{ affiliate_url: string; priority: number; status: "active" | "broken" }>;
 
 export async function adminSlotsRoutes(fastify: FastifyInstance) {
-  // Vista para el dashboard (Etapa 9): todos los slots del usuario, con el
-  // título del producto al que pertenecen — sirve tanto para listar todo
-  // como para la pantalla de "productos/slots en alerta" (?status=unavailable).
-  fastify.get<{ Querystring: { status?: "active" | "unavailable" | "checking" } }>(
+  // Tablero global para el dashboard: todos los slots del usuario en una
+  // sola lista plana, con el título del producto al que pertenece cada uno
+  // (un slot no tiene ese dato propio, hace falta el join). Filtrable por
+  // status real de la fila (active|broken) — ya no hay agregación por
+  // dominio acá, eso quedó específico de /v1/products (ver routes/products.ts).
+  fastify.get<{ Querystring: { status?: "active" | "broken" } }>(
     "/slots",
     {
       schema: {
         tags: ["admin"],
-        summary: "Lista tus slots (con el producto al que pertenecen), opcionalmente filtrados por status",
+        summary: "Lista todos tus slots (tablero global), con el producto de cada uno",
         querystring: {
           type: "object",
-          properties: { status: { type: "string", enum: ["active", "unavailable", "checking"] } },
+          properties: { status: { type: "string", enum: ["active", "broken"] } },
         },
       },
     },
@@ -32,22 +47,23 @@ export async function adminSlotsRoutes(fastify: FastifyInstance) {
           id: slots.id,
           productId: slots.productId,
           productTitulo: products.titulo,
-          provider: slots.provider,
-          country: slots.country,
+          dominio: slots.dominio,
+          affiliateUrl: slots.affiliateUrl,
+          priority: slots.priority,
           status: slots.status,
         })
         .from(slots)
         .innerJoin(products, eq(products.id, slots.productId))
-        .where(and(...conditions));
+        .where(and(...conditions))
+        .orderBy(asc(products.titulo), asc(slots.dominio), asc(slots.priority));
     },
   );
 
-  // Slots de un producto con sus links candidatos (para la pantalla de
-  // detalle del dashboard) — a diferencia de /v1/products/:id/slots, esta
-  // incluye todos los status y los SlotLink completos, no solo el cta_url.
+  // Slots de un producto puntual (para la pantalla de detalle del
+  // dashboard) — filas crudas, ordenadas por dominio y luego prioridad.
   fastify.get<{ Params: { id: string } }>(
     "/products/:id/slots",
-    { schema: { tags: ["admin"], summary: "Slots de un producto con sus links candidatos" } },
+    { schema: { tags: ["admin"], summary: "Lista los slots (links) de un producto" } },
     async (request, reply) => {
       const ownerUserId = await getCurrentUserId();
       const productId = request.params.id;
@@ -58,45 +74,32 @@ export async function adminSlotsRoutes(fastify: FastifyInstance) {
         .where(and(eq(products.id, productId), eq(products.ownerUserId, ownerUserId)));
       if (!product) return reply.code(404).send({ error: "product_not_found" });
 
-      const slotRows = await db.select().from(slots).where(eq(slots.productId, productId));
-      if (slotRows.length === 0) return [];
-
-      const linkRows = await db
+      return db
         .select()
-        .from(slotLinks)
-        .where(
-          inArray(
-            slotLinks.slotId,
-            slotRows.map((s) => s.id),
-          ),
-        );
-
-      const linksBySlot = new Map<string, typeof linkRows>();
-      for (const link of linkRows) {
-        const arr = linksBySlot.get(link.slotId) ?? [];
-        arr.push(link);
-        linksBySlot.set(link.slotId, arr);
-      }
-
-      return slotRows.map((slot) => ({ ...slot, links: linksBySlot.get(slot.id) ?? [] }));
+        .from(slots)
+        .where(eq(slots.productId, productId))
+        .orderBy(asc(slots.dominio), asc(slots.priority));
     },
   );
 
-  // Slot = producto + proveedor + país (ver 01-solucion-final.md §2). No hay
-  // PATCH: provider/country son la identidad del slot, no se editan una vez
-  // creado — si hace falta otro canal, se crea un slot nuevo.
+  // Alta de un slot (link + prioridad) para un producto+dominio.
+  // - Sin priority: se calcula sola como "el último de la cola" de ese dominio.
+  // - Con priority explícita que ya está ocupada por un slot ACTIVO: en vez
+  //   de rechazar el alta, se corre un lugar a ese y a los siguientes de la
+  //   cola (insertar-y-empujar), y el nuevo slot toma esa prioridad.
   fastify.post<{ Params: { id: string }; Body: CreateSlotBody }>(
     "/products/:id/slots",
     {
       schema: {
         tags: ["admin"],
-        summary: "Crea un slot (proveedor + país) para un producto",
+        summary: "Crea un slot (link candidato) para un dominio del producto",
         body: {
           type: "object",
-          required: ["provider", "country"],
+          required: ["dominio", "affiliate_url"],
           properties: {
-            provider: { type: "string", enum: ["amazon", "mercadolibre"] },
-            country: { type: "string", minLength: 2, maxLength: 5 },
+            dominio: dominioSchema,
+            affiliate_url: { type: "string", format: "uri" },
+            priority: { type: "integer", minimum: 0 },
           },
         },
       },
@@ -104,6 +107,7 @@ export async function adminSlotsRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const ownerUserId = await getCurrentUserId();
       const productId = request.params.id;
+      const { dominio } = request.body;
 
       const [product] = await db
         .select({ id: products.id })
@@ -111,25 +115,78 @@ export async function adminSlotsRoutes(fastify: FastifyInstance) {
         .where(and(eq(products.id, productId), eq(products.ownerUserId, ownerUserId)));
       if (!product) return reply.code(404).send({ error: "product_not_found" });
 
-      try {
-        const [created] = await db
-          .insert(slots)
-          .values({
-            productId,
-            provider: request.body.provider,
-            country: request.body.country,
-          })
-          .returning();
-        return reply.code(201).send(created);
-      } catch (err) {
-        if (err instanceof Error && err.message.includes("UNIQUE")) {
-          return reply.code(409).send({
-            error: "slot_already_exists",
-            message: `Ya existe un slot ${request.body.provider}:${request.body.country} para este producto.`,
-          });
-        }
-        throw err;
+      const priority = request.body.priority ?? (await nextPriorityFor(productId, dominio));
+
+      if (request.body.priority !== undefined && (await isActivePriorityTaken(productId, dominio, priority))) {
+        await makeRoomForPriority(productId, dominio, priority);
       }
+
+      const [created] = await db
+        .insert(slots)
+        .values({
+          productId,
+          dominio,
+          affiliateUrl: request.body.affiliate_url,
+          priority,
+        })
+        .returning();
+      return reply.code(201).send(created);
+    },
+  );
+
+  // Editar el link, la prioridad o reactivar/romper un slot a mano. No se
+  // puede cambiar el dominio de un slot existente (cambiaría de canal) — si
+  // hace falta, se borra y se crea uno nuevo en el dominio correcto.
+  fastify.patch<{ Params: { id: string }; Body: PatchSlotBody }>(
+    "/slots/:id",
+    {
+      schema: {
+        tags: ["admin"],
+        summary: "Edita un slot (link, prioridad o estado)",
+        body: {
+          type: "object",
+          properties: {
+            affiliate_url: { type: "string", format: "uri" },
+            priority: { type: "integer", minimum: 0 },
+            status: { type: "string", enum: ["active", "broken"] },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const ownerUserId = await getCurrentUserId();
+      const slotId = request.params.id;
+
+      const [owned] = await db
+        .select({ productId: slots.productId, dominio: slots.dominio, status: slots.status })
+        .from(slots)
+        .innerJoin(products, eq(products.id, slots.productId))
+        .where(and(eq(slots.id, slotId), eq(products.ownerUserId, ownerUserId)));
+      if (!owned) return reply.code(404).send({ error: "slot_not_found" });
+
+      const b = request.body;
+      const patch: Record<string, unknown> = {};
+      if (b.affiliate_url !== undefined) patch.affiliateUrl = b.affiliate_url;
+      if (b.priority !== undefined) patch.priority = b.priority;
+      if (b.status !== undefined) patch.status = b.status;
+
+      // Si el resultado de este patch deja al slot activo con una prioridad
+      // que ya usa otro slot activo del mismo dominio, se le hace lugar
+      // (insertar-y-empujar) en vez de romper el índice único parcial. A
+      // diferencia del alta, acá el slot que se mueve YA ocupa un lugar en
+      // la tabla — antes de correr a los demás hay que sacarlo del medio
+      // (a una prioridad temporal fuera de rango), porque si no el corrimiento
+      // choca contra su propio valor viejo (es un intercambio, no un insert).
+      const resultStatus = b.status ?? owned.status;
+      if (b.priority !== undefined && resultStatus === "active") {
+        if (await isActivePriorityTaken(owned.productId, owned.dominio, b.priority, slotId)) {
+          await db.update(slots).set({ priority: -1 }).where(eq(slots.id, slotId));
+          await makeRoomForPriority(owned.productId, owned.dominio, b.priority, slotId);
+        }
+      }
+
+      const [updated] = await db.update(slots).set(patch).where(eq(slots.id, slotId)).returning();
+      return updated;
     },
   );
 
@@ -139,8 +196,6 @@ export async function adminSlotsRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const ownerUserId = await getCurrentUserId();
 
-      // Confirma que el slot pertenece a un producto del usuario actual antes
-      // de borrar (queda listo para cuando haya más de un owner posible).
       const [owned] = await db
         .select({ id: slots.id })
         .from(slots)
