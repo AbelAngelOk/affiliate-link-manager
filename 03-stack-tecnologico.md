@@ -18,11 +18,13 @@ Se evaluó Go como alternativa por la posibilidad de un binario único sin depen
 - Fastify por ser liviano y tener soporte de primera clase para generar OpenAPI automáticamente desde los schemas de las rutas (clave para el punto de documentación, §3.4).
 - El job de verificación (fan-out de checks a Amazon/ML) se resuelve con `Promise.allSettled` + un límite de concurrencia simple (ej. `p-limit`) — funcionalmente equivalente a lo que daría Go, con algo más de código.
 
-## 3.3 Autenticación: API key estática para v1
+## 3.3 Autenticación: email + contraseña, multi-tenant
 
-Con el proyecto confirmado como single-tenant por ahora, no se implementa el flujo OAuth2 completo todavía — sería complejidad sin beneficio inmediato (ver `01-solucion-final.md` §3 para el detalle y el plan de migración). Para esta versión:
-- Un único secreto (`API_KEY`) generado una vez, validado en un hook `onRequest` de Fastify contra el header `Authorization: Bearer <api_key>`.
-- El modelo de datos ya incluye `owner_user_id` en `Product` apuntando a una única fila `User`, para que el día que haga falta multi-tenant real el cambio quede acotado a la capa de auth (reemplazar el hook por validación de JWT OAuth) sin tocar el esquema.
+Adelantado respecto al plan original (`01-solucion-final.md` §3 documentaba esto como "cuando escale", pero se implementó ya con el proyecto en producción): cualquiera se registra con email+contraseña (`POST /auth/register`) y pasa a ser dueño de sus propios `Product`. El mismo JWT que devuelve el login sirve tanto para el dashboard (guardado en cookie httpOnly) como para llamar a la API directo.
+- Contraseña hasheada con scrypt (`node:crypto`, sin dependencia externa — mismo criterio que evitar `bcrypt` nativo, ver nota de `better-sqlite3` más abajo sobre dependencias nativas en Docker).
+- JWT firmado con `jose` (`HS256`, `JWT_SECRET`), verificado en un hook `onRequest` de Fastify contra el header `Authorization: Bearer <token>`.
+- `/internal/check` (el que dispara el cron) usa una credencial separada (`INTERNAL_KEY`), no ligada a ningún usuario — no tiene sentido detrás de un login humano.
+- El modelo de datos ya traía `owner_user_id` en `Product` desde v1 apuntando a una única fila `User` — la migración fue reemplazar el hook de auth y agregar `password_hash`/índice único en `email`, sin tocar `Product`/`Slot`.
 
 ## 3.4 Documentación de la API (SEO + GEO + LLMO) y Postman
 
@@ -52,14 +54,14 @@ El uso principal declarado es **programático** — se gestiona desde Postman o 
 ## 3.5 Dashboard (CRUD)
 
 Aunque el uso principal es programático, tiene sentido un frontend chico para dar de alta/editar Products y Slots (cada uno ya es un link + prioridad, ver `01-solucion-final.md` §2) sin tener que armar requests a mano en Postman para cada cambio:
-- Mismo sitio Next.js del punto anterior, con rutas protegidas por la misma `API_KEY` (guardada en una cookie de sesión tras un login simple, no hace falta más para un solo usuario).
+- Mismo sitio Next.js del punto anterior, con rutas protegidas por el JWT de sesión (§3.3), guardado en una cookie httpOnly tras el login/registro con email+contraseña.
 - **UI con shadcn/ui** (Tailwind CSS v4 + Radix UI): componentes copiados al repo (`components/ui/*`), no una dependencia de paquete — encaja con el resto del stack porque no agrega un runtime extra, solo código que ya queda en el proyecto y se puede editar directo.
 - Productos y Slots se muestran como tableros (`@tanstack/react-table` para el ordenamiento de columnas), no como listas/tarjetas — cada fila es una entidad, cada columna un atributo, con una columna de acciones. Los slots de un producto se ven filtrados por ese producto en la página de detalle, y hay un tablero global en `/slots` con todos los slots de todos los productos (aclarando a cuál pertenece cada uno).
 - "Apps" es una vista de solo lectura derivada de `products.apps[]` (no hay entidad App, ver `01-solucion-final.md` §2) — agrupa por nombre de app y muestra qué productos la usan.
 - CRUD directo contra los endpoints de la API (no una capa de datos aparte) — el dashboard es un cliente más de la API, igual que cualquier app consumidora, solo que con permisos de escritura.
 - No hace falta un framework de admin (Directus/PocketBase, etc.) — al ser CRUD sobre pocas entidades y un solo usuario, tableros + formularios con shadcn/ui alcanza y evita sumar una pieza más al stack.
 
-**Tres entidades separadas para quien las usa, aunque compartan el mismo Next.js:** marketing (`/`, header oscuro con accesos a docs y al portal), documentación pública (`/docs`) y el portal de administración (todo lo protegido por `API_KEY`: `/productos`, `/apps`, `/slots`). Cada una vive bajo su propio layout — el layout raíz no impone ningún header compartido — y el login (`/login`) es una pantalla propia, sin nav, con el formulario centrado sobre fondo blanco a modo de modal. El portal usa un menú vertical oscuro fijo (Productos / Apps / Slots) en vez del header horizontal de la versión anterior, con un acceso a la documentación que abre en una pestaña nueva.
+**Tres entidades separadas para quien las usa, aunque compartan el mismo Next.js:** marketing (`/`, header oscuro con accesos a docs y al portal), documentación pública (`/docs`) y el portal de administración (todo lo protegido por sesión: `/productos`, `/apps`, `/slots`). Cada una vive bajo su propio layout — el layout raíz no impone ningún header compartido — y el login (`/login`) y el registro (`/register`) son pantallas propias, sin nav, con el formulario centrado sobre fondo blanco a modo de modal. El portal usa un menú vertical oscuro fijo (Productos / Apps / Slots) en vez del header horizontal de la versión anterior, con un acceso a la documentación que abre en una pestaña nueva.
 
 ## 3.6 Organización del repositorio: API y front en el mismo proyecto (monorepo)
 

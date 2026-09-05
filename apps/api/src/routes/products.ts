@@ -2,7 +2,6 @@ import type { FastifyInstance } from "fastify";
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { products, slots } from "../db/schema.js";
-import { getCurrentUserId } from "../auth/currentUser.js";
 
 type SlotRow = {
   id: string;
@@ -63,7 +62,7 @@ export async function productsRoutes(fastify: FastifyInstance) {
     },
     async (request, reply) => {
       const { app: appName, include_unavailable: includeUnavailable } = request.query;
-      const ownerUserId = await getCurrentUserId();
+      const ownerUserId = request.userId;
 
       const allProductRows = await db
         .select({
@@ -135,7 +134,7 @@ export async function productsRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const { id: productId } = request.params;
       const { dominio, include_unavailable: includeUnavailable } = request.query;
-      const ownerUserId = await getCurrentUserId();
+      const ownerUserId = request.userId;
 
       const [product] = await db
         .select({ id: products.id })

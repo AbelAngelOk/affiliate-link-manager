@@ -13,15 +13,16 @@ export class ApiError extends Error {
 
 // El dashboard es un cliente más de la API (ver 03-stack-tecnologico.md §3.6):
 // nunca toca SQLite directo. Solo corre server-side (import "server-only")
-// para que la API key guardada en la cookie httpOnly nunca llegue al browser.
+// para que el access token guardado en la cookie httpOnly nunca llegue al
+// browser.
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const store = await cookies();
-  const apiKey = store.get("api_key")?.value;
-  if (!apiKey) throw new ApiError(401, "No hay sesión activa.");
+  const accessToken = store.get("access_token")?.value;
+  if (!accessToken) throw new ApiError(401, "No hay sesión activa.");
 
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...init.headers, Authorization: `Bearer ${apiKey}` },
+    headers: { "Content-Type": "application/json", ...init.headers, Authorization: `Bearer ${accessToken}` },
     cache: "no-store",
   });
 

@@ -2,7 +2,6 @@ import type { FastifyInstance } from "fastify";
 import { and, eq } from "drizzle-orm";
 import { db } from "../../db/client.js";
 import { products } from "../../db/schema.js";
-import { getCurrentUserId } from "../../auth/currentUser.js";
 
 // Texto plano únicamente (rechaza < y >) y límites de longitud según
 // 01-solucion-final.md §2.1 — se enforcean acá, en la escritura, para que
@@ -43,16 +42,19 @@ type ProductBody = {
 };
 
 export async function adminProductsRoutes(fastify: FastifyInstance) {
-  fastify.get("/products", { schema: { tags: ["admin"], summary: "Lista tus productos" } }, async () => {
-    const ownerUserId = await getCurrentUserId();
-    return db.select().from(products).where(eq(products.ownerUserId, ownerUserId));
-  });
+  fastify.get(
+    "/products",
+    { schema: { tags: ["admin"], summary: "Lista tus productos" } },
+    async (request) => {
+      return db.select().from(products).where(eq(products.ownerUserId, request.userId));
+    },
+  );
 
   fastify.post<{ Body: ProductBody }>(
     "/products",
     { schema: { tags: ["admin"], summary: "Crea un producto", body: productBodySchema } },
     async (request, reply) => {
-      const ownerUserId = await getCurrentUserId();
+      const ownerUserId = request.userId;
       const b = request.body;
       const [created] = await db
         .insert(products)
@@ -81,7 +83,7 @@ export async function adminProductsRoutes(fastify: FastifyInstance) {
       },
     },
     async (request, reply) => {
-      const ownerUserId = await getCurrentUserId();
+      const ownerUserId = request.userId;
       const { id } = request.params;
       const b = request.body;
       const patch: Record<string, unknown> = {};
@@ -108,7 +110,7 @@ export async function adminProductsRoutes(fastify: FastifyInstance) {
     "/products/:id",
     { schema: { tags: ["admin"], summary: "Borra un producto" } },
     async (request, reply) => {
-      const ownerUserId = await getCurrentUserId();
+      const ownerUserId = request.userId;
       const [deleted] = await db
         .delete(products)
         .where(and(eq(products.id, request.params.id), eq(products.ownerUserId, ownerUserId)))

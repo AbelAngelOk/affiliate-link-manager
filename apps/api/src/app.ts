@@ -1,10 +1,12 @@
 import Fastify, { type FastifyError } from "fastify";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
-import { requireApiKey } from "./plugins/requireApiKey.js";
+import { requireAuth } from "./plugins/requireAuth.js";
+import { requireInternalKey } from "./plugins/requireInternalKey.js";
 import { productsRoutes } from "./routes/products.js";
 import { redirectRoutes } from "./routes/redirect.js";
 import { llmsRoutes } from "./routes/llms.js";
+import { authRoutes } from "./routes/auth.js";
 import { adminProductsRoutes } from "./routes/admin/products.js";
 import { adminSlotsRoutes } from "./routes/admin/slots.js";
 import { adminCheckRoutes } from "./routes/admin/check.js";
@@ -38,11 +40,17 @@ export async function buildApp() {
       },
       components: {
         securitySchemes: {
-          apiKey: { type: "http", scheme: "bearer", description: "API key estática (v1, single-tenant)." },
+          bearerAuth: {
+            type: "http",
+            scheme: "bearer",
+            description:
+              "Access token obtenido en POST /auth/register o /auth/login (email+contraseña). El mismo token sirve para el dashboard y para llamar a la API directo.",
+          },
         },
       },
-      security: [{ apiKey: [] }],
+      security: [{ bearerAuth: [] }],
       tags: [
+        { name: "auth", description: "Registro e inicio de sesión (email+contraseña)." },
         { name: "productos", description: "Lectura de productos y sus slots (consumido por las apps)." },
         { name: "redirect", description: "Endpoint público que va en el botón de compra." },
         { name: "admin", description: "Alta/edición/baja de Products y Slots." },
@@ -55,23 +63,25 @@ export async function buildApp() {
   app.get("/health", { schema: { hide: true } }, async () => ({ status: "ok" }));
   app.get("/openapi.json", { schema: { hide: true } }, async () => app.swagger());
 
-  // /r/* y /llms.txt son públicos.
+  // /r/*, /llms.txt y /auth/* son públicos (auth/register-login son el
+  // punto de entrada antes de tener ningún token — ver routes/auth.ts).
   await app.register(redirectRoutes);
   await app.register(llmsRoutes);
+  await app.register(authRoutes);
 
-  // /v1/* requiere API key: lectura para las apps consumidoras.
+  // /v1/* requiere estar logueado: lectura para las apps consumidoras.
   await app.register(
     async (v1) => {
-      v1.addHook("onRequest", requireApiKey);
+      v1.addHook("onRequest", requireAuth);
       await v1.register(productsRoutes);
     },
     { prefix: "/v1" },
   );
 
-  // /admin/* requiere API key: alta/edición/baja (Etapa 5).
+  // /admin/* requiere estar logueado: alta/edición/baja (Etapa 5).
   await app.register(
     async (admin) => {
-      admin.addHook("onRequest", requireApiKey);
+      admin.addHook("onRequest", requireAuth);
       await admin.register(adminProductsRoutes);
       await admin.register(adminSlotsRoutes);
       await admin.register(adminCheckRoutes);
@@ -79,10 +89,12 @@ export async function buildApp() {
     { prefix: "/admin" },
   );
 
-  // /internal/* requiere API key: lo dispara el cron (Etapa 7).
+  // /internal/* usa una credencial separada (INTERNAL_KEY, ver
+  // plugins/requireInternalKey.ts): lo dispara el cron de GitHub Actions
+  // (Etapa 7), no un usuario logueado.
   await app.register(
     async (internal) => {
-      internal.addHook("onRequest", requireApiKey);
+      internal.addHook("onRequest", requireInternalKey);
       await internal.register(internalRoutes);
     },
     { prefix: "/internal" },

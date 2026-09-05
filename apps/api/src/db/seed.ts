@@ -1,11 +1,11 @@
 import { db } from "./client.js";
 import { products, slots, users } from "./schema.js";
+import { hashPassword } from "../auth/password.js";
 
 // Datos de ejemplo con variedad (varios productos, apps y status de slot)
 // para poder probar filtros/orden en el dashboard. Idempotente: limpia las
 // tablas antes de insertar, para poder correrlo las veces que haga falta sin
-// acumular filas huérfanas ni cambiar el usuario "actual" que cachea
-// getCurrentUserId() en el servidor corriendo.
+// acumular filas huérfanas. Login local: abel.angel1996@gmail.com / dev12345
 async function seed() {
   await db.delete(slots);
   await db.delete(products);
@@ -13,7 +13,7 @@ async function seed() {
 
   const [user] = await db
     .insert(users)
-    .values({ email: "abel.angel1996@gmail.com" })
+    .values({ email: "abel.angel1996@gmail.com", passwordHash: await hashPassword("dev12345") })
     .returning();
 
   const [libro] = await db

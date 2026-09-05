@@ -2,7 +2,6 @@ import type { FastifyInstance } from "fastify";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "../../db/client.js";
 import { products, slots } from "../../db/schema.js";
-import { getCurrentUserId } from "../../auth/currentUser.js";
 import { isActivePriorityTaken, makeRoomForPriority, nextPriorityFor } from "../../db/priority.js";
 
 const plainText = (maxLength: number, minLength = 1) => ({
@@ -38,7 +37,7 @@ export async function adminSlotsRoutes(fastify: FastifyInstance) {
       },
     },
     async (request) => {
-      const ownerUserId = await getCurrentUserId();
+      const ownerUserId = request.userId;
       const conditions = [eq(products.ownerUserId, ownerUserId)];
       if (request.query.status) conditions.push(eq(slots.status, request.query.status));
 
@@ -65,7 +64,7 @@ export async function adminSlotsRoutes(fastify: FastifyInstance) {
     "/products/:id/slots",
     { schema: { tags: ["admin"], summary: "Lista los slots (links) de un producto" } },
     async (request, reply) => {
-      const ownerUserId = await getCurrentUserId();
+      const ownerUserId = request.userId;
       const productId = request.params.id;
 
       const [product] = await db
@@ -105,7 +104,7 @@ export async function adminSlotsRoutes(fastify: FastifyInstance) {
       },
     },
     async (request, reply) => {
-      const ownerUserId = await getCurrentUserId();
+      const ownerUserId = request.userId;
       const productId = request.params.id;
       const { dominio } = request.body;
 
@@ -154,7 +153,7 @@ export async function adminSlotsRoutes(fastify: FastifyInstance) {
       },
     },
     async (request, reply) => {
-      const ownerUserId = await getCurrentUserId();
+      const ownerUserId = request.userId;
       const slotId = request.params.id;
 
       const [owned] = await db
@@ -194,7 +193,7 @@ export async function adminSlotsRoutes(fastify: FastifyInstance) {
     "/slots/:id",
     { schema: { tags: ["admin"], summary: "Borra un slot" } },
     async (request, reply) => {
-      const ownerUserId = await getCurrentUserId();
+      const ownerUserId = request.userId;
 
       const [owned] = await db
         .select({ id: slots.id })

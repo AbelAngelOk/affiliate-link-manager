@@ -9,11 +9,11 @@ import { NextResponse, type NextRequest } from "next/server";
 // las usa aunque compartan el mismo Next.js — cada una vive bajo su propio
 // layout (ver app/layout.tsx, app/docs, app/(admin)) y acá se refleja esa
 // separación en términos de qué requiere sesión y qué no.
-const PUBLIC_PREFIXES = ["/login", "/api/session", "/docs", "/sitemap.xml", "/robots.txt"];
+const PUBLIC_PREFIXES = ["/login", "/register", "/api/session", "/docs", "/sitemap.xml", "/robots.txt"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const hasSession = Boolean(request.cookies.get("api_key")?.value);
+  const hasSession = Boolean(request.cookies.get("access_token")?.value);
   const isPublicPath = pathname === "/" || PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 
   if (!hasSession && !isPublicPath) {

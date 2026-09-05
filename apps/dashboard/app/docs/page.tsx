@@ -58,12 +58,19 @@ export default async function DocsPage() {
             <section id="autenticacion" className="mb-10 scroll-mt-4">
               <h2 className="mb-2 text-xl font-semibold">Autenticación</h2>
               <p className="text-sm text-muted-foreground">
-                Todas las rutas salvo{" "}
+                Registrate con{" "}
+                <code className="rounded bg-muted px-1 py-0.5">POST /auth/register</code> (o iniciá sesión con{" "}
+                <code className="rounded bg-muted px-1 py-0.5">POST /auth/login</code>) mandando{" "}
+                <code className="rounded bg-muted px-1 py-0.5">email</code> y{" "}
+                <code className="rounded bg-muted px-1 py-0.5">password</code> — la respuesta trae un{" "}
+                <code className="rounded bg-muted px-1 py-0.5">access_token</code> que usás como{" "}
+                <code className="rounded bg-muted px-1 py-0.5">Authorization: Bearer &lt;access_token&gt;</code> en el resto
+                de la API. Es el mismo login que usa este panel: cada cuenta es dueña únicamente de sus propios productos y
+                slots. Todas las rutas requieren ese header salvo{" "}
                 <code className="rounded bg-muted px-1 py-0.5">
                   /r/{"{product_id}"}/{"{dominio}"}
                 </code>{" "}
-                requieren el header <code className="rounded bg-muted px-1 py-0.5">Authorization: Bearer &lt;API_KEY&gt;</code>. v1
-                es single-tenant: una única API key por cuenta (ver el plan de migración a OAuth multi-tenant en el repo).
+                (pública, es la que va en el botón de compra) y las de <code className="rounded bg-muted px-1 py-0.5">/auth</code>.
               </p>
             </section>
 

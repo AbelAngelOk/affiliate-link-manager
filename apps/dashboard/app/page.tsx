@@ -21,7 +21,7 @@ const FEATURES = [
 ];
 
 // Entidad separada del portal y de los docs (ver app/layout.tsx): esta es la
-// única página que un visitante sin API key debería ver primero.
+// única página que un visitante sin cuenta debería ver primero.
 export default function MarketingPage() {
   return (
     <div className="min-h-screen bg-white">

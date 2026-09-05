@@ -1,7 +1,9 @@
 # Etapa 7 (05-plan-de-desarrollo.md): dispara el verificador de disponibilidad
 # cada 12h contra la API ya desplegada. Requiere dos secrets en el repo:
-#   API_BASE_URL — ej. https://links-referidos-api.fly.dev
-#   API_KEY      — la misma API key configurada en el servidor
+#   API_BASE_URL  — ej. https://links-referidos-api.fly.dev
+#   INTERNAL_KEY  — el mismo INTERNAL_KEY configurado en el servidor (ver
+#                   apps/api/src/plugins/requireInternalKey.ts — separado del
+#                   login de usuarios, es solo para /internal/*)
 name: Checker de disponibilidad
 
 on:
@@ -16,5 +18,5 @@ jobs:
       - name: POST /internal/check
         run: |
           curl -sf -X POST \
-            -H "Authorization: Bearer ${{ secrets.API_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.INTERNAL_KEY }}" \
             "${{ secrets.API_BASE_URL }}/internal/check"

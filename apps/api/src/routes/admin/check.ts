@@ -2,7 +2,6 @@ import type { FastifyInstance } from "fastify";
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../../db/client.js";
 import { products, slots } from "../../db/schema.js";
-import { getCurrentUserId } from "../../auth/currentUser.js";
 import { checkSlots } from "../../checker/runCheck.js";
 
 // Disparadores manuales del verificador (ver 06-verificacion-de-disponibilidad.md):
@@ -16,7 +15,7 @@ export async function adminCheckRoutes(fastify: FastifyInstance) {
     "/slots/:id/check",
     { schema: { tags: ["admin"], summary: "Valida un slot puntual" } },
     async (request, reply) => {
-      const ownerUserId = await getCurrentUserId();
+      const ownerUserId = request.userId;
 
       const [row] = await db
         .select({ slot: slots })
@@ -34,7 +33,7 @@ export async function adminCheckRoutes(fastify: FastifyInstance) {
     "/products/:id/check",
     { schema: { tags: ["admin"], summary: "Valida todos los slots de un producto" } },
     async (request, reply) => {
-      const ownerUserId = await getCurrentUserId();
+      const ownerUserId = request.userId;
 
       const [product] = await db
         .select({ id: products.id })
@@ -54,7 +53,7 @@ export async function adminCheckRoutes(fastify: FastifyInstance) {
     "/apps/:name/check",
     { schema: { tags: ["admin"], summary: "Valida todos los slots de todos los productos de una app" } },
     async (request) => {
-      const ownerUserId = await getCurrentUserId();
+      const ownerUserId = request.userId;
       const appName = decodeURIComponent(request.params.name);
 
       const userProducts = await db

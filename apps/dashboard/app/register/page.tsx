@@ -7,10 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-// Entidad separada del resto del sitio (ver app/layout.tsx): solo el modal
-// de login sobre fondo blanco, sin nav ni chrome — es la puerta de entrada
-// al portal de administración, no una página más del dashboard.
-export default function LoginPage() {
+// Mismo tratamiento que /login (ver app/layout.tsx): entidad separada, solo
+// el formulario sobre fondo blanco. El registro te loguea directo — no hay
+// paso de confirmación de email en esta versión.
+export default function RegisterPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -25,13 +25,13 @@ export default function LoginPage() {
     const res = await fetch("/api/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password, mode: "login" }),
+      body: JSON.stringify({ email, password, mode: "register" }),
     });
 
     setLoading(false);
     if (!res.ok) {
       const body = (await res.json().catch(() => ({}))) as { error?: string };
-      setError(body.error ?? "No se pudo iniciar sesión.");
+      setError(body.error ?? "No se pudo crear la cuenta.");
       return;
     }
 
@@ -42,8 +42,10 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-white p-4">
       <div className="w-full max-w-sm rounded-xl border p-6 shadow-lg">
-        <h1 className="mb-1 text-lg font-semibold">Portal de administración</h1>
-        <p className="mb-5 text-sm text-muted-foreground">Iniciá sesión para continuar.</p>
+        <h1 className="mb-1 text-lg font-semibold">Crear cuenta</h1>
+        <p className="mb-5 text-sm text-muted-foreground">
+          El mismo login sirve para el portal y para usar la API directo.
+        </p>
 
         <form onSubmit={handleSubmit} className="space-y-3">
           <div className="space-y-1">
@@ -62,21 +64,23 @@ export default function LoginPage() {
             <Input
               id="password"
               type="password"
+              minLength={8}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
             />
+            <p className="text-xs text-muted-foreground">Mínimo 8 caracteres.</p>
           </div>
           <Button type="submit" disabled={loading} className="w-full">
-            {loading ? "Entrando..." : "Entrar"}
+            {loading ? "Creando cuenta..." : "Crear cuenta"}
           </Button>
           {error && <p className="text-sm text-destructive">{error}</p>}
         </form>
 
         <p className="mt-4 text-center text-sm text-muted-foreground">
-          ¿No tenés cuenta?{" "}
-          <Link href="/register" className="text-primary hover:underline">
-            Registrate
+          ¿Ya tenés cuenta?{" "}
+          <Link href="/login" className="text-primary hover:underline">
+            Iniciá sesión
           </Link>
         </p>
       </div>

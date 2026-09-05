@@ -12,7 +12,14 @@ function required(name: string): string {
 
 export const config = {
   port: Number(process.env.PORT ?? 3000),
-  apiKey: required("API_KEY"),
+  // Firma los JWT que emiten POST /auth/register y /auth/login (ver
+  // 01-solucion-final.md §3) — el usuario se autentica con email+contraseña,
+  // no con una key estática.
+  jwtSecret: required("JWT_SECRET"),
+  // Credencial separada, no ligada a ningún usuario: solo gatea
+  // POST /internal/check (el cron de GitHub Actions), que no es un login
+  // humano y no tiene sentido detrás de email+contraseña.
+  internalKey: required("INTERNAL_KEY"),
   databasePath: process.env.DATABASE_PATH ?? "./data/dev.db",
   // Opcional: sin esto, las notificaciones de Etapa 8 solo loguean en
   // consola en vez de mandar el mensaje real a Telegram.

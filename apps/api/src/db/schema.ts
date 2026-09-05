@@ -12,14 +12,25 @@ const timestamps = {
     .$defaultFn(() => new Date()),
 };
 
-// Fila única en v1 (single-tenant). El modelo ya soporta más filas para
-// cuando se migre a OAuth multi-tenant (ver 01-solucion-final.md §3).
-export const users = sqliteTable("users", {
-  id: id(),
-  email: text("email").notNull(),
-  oauthSubject: text("oauth_subject"),
-  ...timestamps,
-});
+// Cuenta multi-tenant (ver 01-solucion-final.md §3): cualquiera se registra
+// con email+contraseña (POST /auth/register) y pasa a ser dueño de sus
+// propios products — no hay usuario "root" ni credencial especial. Ese mismo
+// login sirve tanto para el dashboard (el JWT se guarda en una cookie
+// httpOnly) como para llamar a la API directo (el mismo JWT como Bearer
+// token) — un solo registro para las dos formas de usar el sistema.
+export const users = sqliteTable(
+  "users",
+  {
+    id: id(),
+    email: text("email").notNull(),
+    // Hash scrypt, nunca texto plano (ver auth/password.ts).
+    passwordHash: text("password_hash").notNull(),
+    ...timestamps,
+  },
+  (t) => ({
+    emailUnique: uniqueIndex("users_email_unique").on(t.email),
+  }),
+);
 
 // Límites de longitud documentados en 01-solucion-final.md §2.1.
 // Se enforcean en la capa de validación de escritura (Etapa 5, zod),
