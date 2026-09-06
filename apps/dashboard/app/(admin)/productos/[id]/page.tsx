@@ -5,10 +5,14 @@ import { SlotFormDialog } from "@/app/(admin)/slots/SlotFormDialog";
 import type { Slot } from "@/app/(admin)/slots/columns";
 import { validateProduct } from "@/app/(admin)/productos/actions";
 import { Button } from "@/components/ui/button";
+import { ProductImages, type ProductImage } from "./ProductImages";
 
 export default async function ProductoDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: productId } = await params;
-  const slots = await apiFetch<Slot[]>(`/admin/products/${productId}/slots`);
+  const [slots, images] = await Promise.all([
+    apiFetch<Slot[]>(`/admin/products/${productId}/slots`),
+    apiFetch<ProductImage[]>(`/admin/products/${productId}/images`),
+  ]);
 
   return (
     <main className="space-y-4">
@@ -30,6 +34,8 @@ export default async function ProductoDetailPage({ params }: { params: Promise<{
       </div>
 
       <SlotsTable productId={productId} slots={slots} />
+
+      <ProductImages productId={productId} images={images} />
     </main>
   );
 }

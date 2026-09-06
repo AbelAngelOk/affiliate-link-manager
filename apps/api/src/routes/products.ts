@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db/client.js";
-import { products, slots } from "../db/schema.js";
+import { products, slots, productImages } from "../db/schema.js";
 
 type SlotRow = {
   id: string;
@@ -33,6 +33,20 @@ function toDominioDto(productId: string, dominio: string, candidatos: SlotRow[])
     status: hayActivo ? "active" : "unavailable",
     cta_url: `/r/${productId}/${encodeURIComponent(dominio)}`,
   };
+}
+
+type ImageRow = { aspectRatio: "1:1" | "2:3" | "4:5"; url: string; position: number };
+
+// Los tres conjuntos son opcionales (ver db/schema.ts) — solo se incluyen
+// las claves que efectivamente tienen alguna imagen cargada, para que la app
+// consumidora no tenga que distinguir "array vacío" de "no existe este
+// conjunto" (son lo mismo en la práctica).
+function groupImagesByAspectRatio(imageRows: ImageRow[]): Partial<Record<"1:1" | "2:3" | "4:5", string[]>> {
+  const grouped: Partial<Record<"1:1" | "2:3" | "4:5", string[]>> = {};
+  for (const img of [...imageRows].sort((a, b) => a.position - b.position)) {
+    (grouped[img.aspectRatio] ??= []).push(img.url);
+  }
+  return grouped;
 }
 
 export async function productsRoutes(fastify: FastifyInstance) {
@@ -89,6 +103,17 @@ export async function productsRoutes(fastify: FastifyInstance) {
         slotsByProduct.set(s.productId, arr);
       }
 
+      const imageRows = await db
+        .select({ productId: productImages.productId, aspectRatio: productImages.aspectRatio, url: productImages.url, position: productImages.position })
+        .from(productImages)
+        .where(inArray(productImages.productId, productIds));
+      const imagesByProduct = new Map<string, ImageRow[]>();
+      for (const img of imageRows) {
+        const arr = imagesByProduct.get(img.productId) ?? [];
+        arr.push(img);
+        imagesByProduct.set(img.productId, arr);
+      }
+
       return reply.send(
         productRows.map((p) => {
           const dominios = groupByDominio(slotsByProduct.get(p.id) ?? []);
@@ -101,6 +126,7 @@ export async function productsRoutes(fastify: FastifyInstance) {
             titulo: p.titulo,
             descripcion_corta: p.descripcionCorta,
             imagen_url: p.imagenUrl,
+            imagenes: groupImagesByAspectRatio(imagesByProduct.get(p.id) ?? []),
             slots: dominioDtos,
           };
         }),

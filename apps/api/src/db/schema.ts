@@ -79,10 +79,32 @@ export const products = sqliteTable("products", {
   titulo: text("titulo").notNull(), // máx 80
   descripcionCorta: text("descripcion_corta").notNull(), // máx 160
   descripcionLarga: text("descripcion_larga"), // máx 500, opcional
-  imagenUrl: text("imagen_url").notNull(),
+  imagenUrl: text("imagen_url").notNull(), // imagen principal/portada — se mantiene por compatibilidad, ver `productImages` para el resto
   imagenAlt: text("imagen_alt"), // máx 125, opcional
   categoria: text("categoria").notNull(), // máx 40
   apps: text("apps", { mode: "json" }).notNull().$type<string[]>().default([]),
+  ...timestamps,
+});
+
+// Imágenes adicionales de un producto, más allá de la portada (`imagenUrl`
+// arriba, que no se toca para no romper el contrato ya consumido por las
+// apps). Cada imagen pertenece a uno de tres conjuntos por proporción —
+// 1:1 (miniaturas/tarjetas flexibles), 2:3 (portada tipo libro/poster) y 4:5
+// (formato retrato genérico) — y un producto puede tener cero, una o varias
+// imágenes en cada conjunto; los tres son opcionales. La proporción real del
+// archivo se valida al cargarlo (ver media/imageValidation.ts) contra la
+// declarada acá, no se confía en que quien carga la URL haya medido bien.
+export const productImages = sqliteTable("product_images", {
+  id: id(),
+  productId: text("product_id")
+    .notNull()
+    .references(() => products.id, { onDelete: "cascade" }),
+  aspectRatio: text("aspect_ratio", { enum: ["1:1", "2:3", "4:5"] }).notNull(),
+  url: text("url").notNull(),
+  // Orden dentro del mismo product_id + aspect_ratio — mismo rol que
+  // `priority` en `slots`, pero acá es solo orden de visualización, no
+  // fallback (todas las imágenes de un conjunto son válidas a la vez).
+  position: integer("position").notNull().default(0),
   ...timestamps,
 });
 

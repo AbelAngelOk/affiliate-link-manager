@@ -59,6 +59,12 @@
 - **Tokens de 30 días sin revocación**: si un token se filtra, queda utilizable hasta que expira — cambiar la contraseña no lo invalida (no hay ese chequeo implementado). Es una decisión deliberada de simplicidad (sin refresh tokens ni tabla de sesiones activas), documentada como algo a revisar si el proyecto crece.
 - **Sin límite de intentos de login**: no hay rate limiting en `/auth/login` — en teoría permite fuerza bruta contra una contraseña débil. Mitigado parcialmente por scrypt (cada intento es costoso de verificar), pero no es una defensa real contra un ataque dirigido.
 
+### Imágenes de producto (conjuntos por proporción)
+- **La validación de proporción confía en el `Content-Type`/contenido que devuelva la URL en el momento de cargarla, no lo vuelve a chequear después.** Si más adelante esa URL empieza a servir una imagen distinta (el hosting externo la reemplaza), la API no se entera — no hay una revalidación periódica como sí existe para los links de afiliados (ver `06-verificacion-de-disponibilidad.md`).
+- **Los 500px mínimos y el 3% de tolerancia son valores elegidos por criterio, no medidos contra un caso real de las apps consumidoras** — si `training-app`/`despertador-app` necesitan otra cosa, hay que ajustar `apps/api/src/media/imageValidation.ts` a mano, no es configurable todavía.
+- **Solo se lee el header del archivo (128KB) para medir dimensiones** — más rápido y liviano que descargar la imagen entera, pero un servidor que no soporte `Range` y sirva un archivo enorme antes de completar esos 128KB podría tardar más de lo esperado (mitigado parcialmente con un límite de 20MB por `Content-Length`, que no cubre servidores que no lo informan).
+- **Sin reordenar ni editar una imagen ya cargada** — solo alta y baja, ver `01-solucion-final.md` §2.3.
+
 ### Documentación (SEO/GEO/LLMO)
 - **GEO y LLMO son prácticas emergentes, no estándares con reglas fijas ni garantía de resultado.** A diferencia del SEO tradicional (con señales conocidas y medibles), no hay garantía de que un motor generativo cite o un agente de IA priorice esta documentación por seguir estas convenciones — son buenas prácticas razonables hoy (`llms.txt`, contenido autocontenido y citable, OpenAPI accesible), pero el criterio de estos sistemas puede cambiar sin aviso.
 - El OpenAPI spec y la colección de Postman **valen por sí mismos independientemente de si el SEO/GEO "funciona"** — son el artefacto que efectivamente usa un desarrollador o un agente para integrar la API, con o sin indexación externa de por medio.

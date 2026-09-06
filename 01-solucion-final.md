@@ -21,13 +21,15 @@ Puntos nuevos que agrega el usuario y cómo se resuelven:
 ## 2. Modelo de datos
 
 ```
-User          (id, email, oauth_subject)
+User          (id, email, password_hash)
 Product       (id, owner_user_id, titulo[80], descripcion_corta[160],
                descripcion_larga[500]?, imagen_url, imagen_alt[125]?,
                categoria[40], apps[])
+ProductImage  (id, product_id, aspect_ratio [1:1|2:3|4:5], url, position)
 Slot          (id, product_id, dominio, affiliate_url, priority,
                status [active|broken], last_checked_at, last_ok_at)
 CheckLog      (id, slot_id, checked_at, resultado, detalle)
+ReadApiKey    (id, user_id, key_hash, name, revoked_at)
 ```
 
 Notas clave:
@@ -60,6 +62,14 @@ Reglas adicionales:
 - **No hace falta que la secuencia sea densa.** Cuando un slot se rompe, se queda con su número tal cual (no se renumeran los demás) — el redirect (§4) siempre resuelve "cuál sirvo ahora" con `ORDER BY priority ASC LIMIT 1 WHERE status='active'`, que funciona igual de bien con huecos (0, 2, 7) que con una secuencia perfecta (0, 1, 2). Renumerar en cada rotura significaría updates en cadena sobre el resto de la cola en cada corrida del verificador, y volvería inestable un número que alguien puede estar mirando en el panel — complejidad real sin ninguna ganancia funcional.
 - **Insertar-y-empujar, no error, si se pide una prioridad activa ya ocupada.** Si al crear o editar un slot se indica una prioridad que ya tiene otro slot *activo* del mismo dominio, en vez de devolver `409` el sistema corre un lugar a ese y a los siguientes de la cola (todos +1, empezando por el de mayor número para no chocar consigo mismos a mitad de camino). Sin prioridad explícita, se sigue asignando automáticamente "el último de la cola" (`max` de todo lo que existió alguna vez en ese dominio + 1, activo o roto — para que un número de prioridad nunca quede referido a dos links distintos con el tiempo).
 - **Caso límite: un slot roto que se autorepara puede encontrar su lugar viejo ocupado.** Si mientras estaba `broken` otro slot activo tomó su misma prioridad, al volver a `active` no puede reclamar ese número — se le asigna uno nuevo al final de la cola en vez de romper el índice único.
+
+### 2.3 Imágenes adicionales de un producto
+
+Agregado el 2026-09-06, a pedido explícito: además de `imagen_url` (la portada, que no se toca — sigue siendo el único campo de imagen que ven las apps que ya se integraron), un producto puede tener imágenes extra organizadas en **tres conjuntos por proporción, todos opcionales**: `1:1` (cuadrada), `2:3` (tipo portada de libro/poster) y `4:5` (retrato genérico). Cada conjunto admite más de una imagen.
+
+- **La proporción se valida contra el archivo real, no se confía en la URL.** Al cargar una imagen (`POST /admin/products/{id}/images`), la API descarga el header del archivo (`Range: bytes=0-131071`, no la imagen entera) y mide sus dimensiones reales (`image-size`, sin dependencias nativas — mismo criterio que evitar `bcrypt`/`sharp` en Docker). Se rechaza con `422` si la proporción no coincide con la declarada (tolerancia del 3%, porque casi ninguna imagen real tiene el pixel exacto) o si es más chica que el mínimo (500px de ancho para los tres conjuntos).
+- **`GET /v1/products` agrupa las imágenes por conjunto** en un campo `imagenes` (ej. `{"1:1": ["url1", "url2"], "2:3": ["url3"]}`) — solo aparecen las claves que efectivamente tienen alguna imagen cargada, para que la app consumidora no tenga que distinguir "array vacío" de "conjunto no usado" (es lo mismo en la práctica).
+- **Sin reordenar todavía**: las imágenes de un conjunto se muestran en el orden en que se cargaron (`position`, autoincremental); no hay una acción de "mover" en el panel — si hace falta cambiar el orden, hoy la única forma es borrar y volver a cargar en el orden deseado.
 
 ## 3. Autenticación y aislamiento por entorno
 

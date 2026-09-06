@@ -13,6 +13,7 @@ import { adminSlotsRoutes } from "./routes/admin/slots.js";
 import { adminCheckRoutes } from "./routes/admin/check.js";
 import { adminApiKeysRoutes } from "./routes/admin/apiKeys.js";
 import { adminAccountRoutes } from "./routes/admin/account.js";
+import { adminProductImagesRoutes } from "./routes/admin/productImages.js";
 import { internalRoutes } from "./routes/internal.js";
 
 // Separado de server.ts (que además hace `listen`) para que los scripts de
@@ -99,6 +100,7 @@ export async function buildApp() {
       await admin.register(adminCheckRoutes);
       await admin.register(adminApiKeysRoutes);
       await admin.register(adminAccountRoutes);
+      await admin.register(adminProductImagesRoutes);
     },
     { prefix: "/admin" },
   );
