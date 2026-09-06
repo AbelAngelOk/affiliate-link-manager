@@ -50,6 +50,7 @@ export async function productsRoutes(fastify: FastifyInstance) {
       schema: {
         tags: ["productos"],
         summary: "Lista los productos de una app, con sus dominios (slots agrupados)",
+        security: [{ readApiKey: [] }],
         querystring: {
           type: "object",
           required: ["app"],
@@ -117,6 +118,7 @@ export async function productsRoutes(fastify: FastifyInstance) {
       schema: {
         tags: ["productos"],
         summary: "Filtra los dominios de un producto (ej. amazon.com.mx, mercadolibre.com.ar)",
+        security: [{ readApiKey: [] }],
         params: {
           type: "object",
           required: ["id"],

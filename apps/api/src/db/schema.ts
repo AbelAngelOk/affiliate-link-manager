@@ -15,9 +15,9 @@ const timestamps = {
 // Cuenta multi-tenant (ver 01-solucion-final.md §3): cualquiera se registra
 // con email+contraseña (POST /auth/register) y pasa a ser dueño de sus
 // propios products — no hay usuario "root" ni credencial especial. Ese mismo
-// login sirve tanto para el dashboard (el JWT se guarda en una cookie
-// httpOnly) como para llamar a la API directo (el mismo JWT como Bearer
-// token) — un solo registro para las dos formas de usar el sistema.
+// login le da acceso al dashboard (el JWT se guarda en una cookie httpOnly)
+// y le permite generar sus propias read API keys (ver `readApiKeys` abajo)
+// para que sus apps consuman `/v1/*` sin depender de ese JWT de sesión.
 export const users = sqliteTable(
   "users",
   {
@@ -29,6 +29,35 @@ export const users = sqliteTable(
   },
   (t) => ({
     emailUnique: uniqueIndex("users_email_unique").on(t.email),
+  }),
+);
+
+// Credencial de solo lectura para `/v1/*` (ver 01-solucion-final.md §3): a
+// diferencia del JWT de sesión (30 días, pensado para un humano logueado en
+// el dashboard), esto es para que una app integrada una vez siga funcionando
+// indefinidamente sin volver a loguearse. Se genera desde el dashboard (ahí
+// sí hace falta estar logueado — es "el proceso de elegir a qué cuenta
+// pertenece"), no expira sola, y se revoca seteando `revokedAt` en vez de
+// borrarla (así el historial de qué existió no se pierde). El valor en texto
+// plano se muestra una única vez; acá solo se guarda su hash (ver
+// auth/readKey.ts) — a diferencia de las contraseñas, es un hash simple
+// (sin salt) porque la key ya nace con entropía alta y necesita poder
+// buscarse por igualdad directa en la tabla (no hay otro campo por el que
+// encontrar la fila antes de poder verificarla).
+export const readApiKeys = sqliteTable(
+  "read_api_keys",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    keyHash: text("key_hash").notNull(),
+    name: text("name").notNull(),
+    revokedAt: integer("revoked_at", { mode: "timestamp" }),
+    ...timestamps,
+  },
+  (t) => ({
+    keyHashUnique: uniqueIndex("read_api_keys_key_hash_unique").on(t.keyHash),
   }),
 );
 

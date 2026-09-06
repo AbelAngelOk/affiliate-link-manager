@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { href: "/productos", label: "Productos" },
   { href: "/apps", label: "Apps" },
   { href: "/slots", label: "Slots" },
+  { href: "/api-keys", label: "API Keys" },
 ];
 
 export function AdminNav() {

@@ -2,6 +2,7 @@ import Fastify, { type FastifyError } from "fastify";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import { requireAuth } from "./plugins/requireAuth.js";
+import { requireReadKey } from "./plugins/requireReadKey.js";
 import { requireInternalKey } from "./plugins/requireInternalKey.js";
 import { productsRoutes } from "./routes/products.js";
 import { redirectRoutes } from "./routes/redirect.js";
@@ -10,6 +11,7 @@ import { authRoutes } from "./routes/auth.js";
 import { adminProductsRoutes } from "./routes/admin/products.js";
 import { adminSlotsRoutes } from "./routes/admin/slots.js";
 import { adminCheckRoutes } from "./routes/admin/check.js";
+import { adminApiKeysRoutes } from "./routes/admin/apiKeys.js";
 import { internalRoutes } from "./routes/internal.js";
 
 // Separado de server.ts (que además hace `listen`) para que los scripts de
@@ -44,7 +46,13 @@ export async function buildApp() {
             type: "http",
             scheme: "bearer",
             description:
-              "Access token obtenido en POST /auth/register o /auth/login (email+contraseña). El mismo token sirve para el dashboard y para llamar a la API directo.",
+              "Access token obtenido en POST /auth/register o /auth/login (email+contraseña). Vence a los 30 días — pensado para el dashboard, no para integraciones de larga vida. Usalo en /admin/*.",
+          },
+          readApiKey: {
+            type: "http",
+            scheme: "bearer",
+            description:
+              "Read API key generada desde el dashboard (POST /admin/api-keys, requiere sesión). No expira sola — pensada para que tu app la use indefinidamente en /v1/* sin volver a loguearse.",
           },
         },
       },
@@ -69,22 +77,26 @@ export async function buildApp() {
   await app.register(llmsRoutes);
   await app.register(authRoutes);
 
-  // /v1/* requiere estar logueado: lectura para las apps consumidoras.
+  // /v1/* usa una read API key (ver plugins/requireReadKey.ts), no el JWT de
+  // sesión — es lectura pensada para que una app consumidora la integre una
+  // vez y siga funcionando indefinidamente, sin login humano de por medio.
   await app.register(
     async (v1) => {
-      v1.addHook("onRequest", requireAuth);
+      v1.addHook("onRequest", requireReadKey);
       await v1.register(productsRoutes);
     },
     { prefix: "/v1" },
   );
 
-  // /admin/* requiere estar logueado: alta/edición/baja (Etapa 5).
+  // /admin/* requiere estar logueado: alta/edición/baja (Etapa 5), incluida
+  // la generación/revocación de las read API keys de arriba.
   await app.register(
     async (admin) => {
       admin.addHook("onRequest", requireAuth);
       await admin.register(adminProductsRoutes);
       await admin.register(adminSlotsRoutes);
       await admin.register(adminCheckRoutes);
+      await admin.register(adminApiKeysRoutes);
     },
     { prefix: "/admin" },
   );
