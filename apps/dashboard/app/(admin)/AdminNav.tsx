@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { href: "/apps", label: "Apps" },
   { href: "/slots", label: "Slots" },
   { href: "/api-keys", label: "API Keys" },
+  { href: "/cuenta", label: "Mi cuenta" },
 ];
 
 export function AdminNav() {
