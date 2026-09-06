@@ -73,7 +73,12 @@ export default function LoginPage() {
           {error && <p className="text-sm text-destructive">{error}</p>}
         </form>
 
-        <p className="mt-4 text-center text-sm text-muted-foreground">
+        <p className="mt-3 text-center text-sm">
+          <Link href="/forgot-password" className="text-primary hover:underline">
+            ¿Olvidaste tu contraseña?
+          </Link>
+        </p>
+        <p className="mt-2 text-center text-sm text-muted-foreground">
           ¿No tenés cuenta?{" "}
           <Link href="/register" className="text-primary hover:underline">
             Registrate

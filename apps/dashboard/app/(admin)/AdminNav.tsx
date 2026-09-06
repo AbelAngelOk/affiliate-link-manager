@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { href: "/productos", label: "Productos" },
   { href: "/apps", label: "Apps" },
   { href: "/slots", label: "Slots" },
+  { href: "/tipos", label: "Tipos de producto" },
   { href: "/api-keys", label: "API Keys" },
   { href: "/cuenta", label: "Mi cuenta" },
 ];

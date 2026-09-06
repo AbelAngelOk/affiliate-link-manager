@@ -61,6 +61,28 @@ export const readApiKeys = sqliteTable(
   }),
 );
 
+// Token de un solo uso para "olvidé mi contraseña" (ver
+// 04-alcance-y-limitaciones.md — era una limitación anotada). Mismo criterio
+// de hash que `readApiKeys` (sha256 sin salt, alta entropía, búsqueda
+// directa por igualdad). Vence a la hora (`expiresAt`) y se marca `usedAt`
+// al canjearlo — un token usado no sirve dos veces aunque no haya expirado.
+export const passwordResetTokens = sqliteTable(
+  "password_reset_tokens",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+    usedAt: integer("used_at", { mode: "timestamp" }),
+    ...timestamps,
+  },
+  (t) => ({
+    tokenHashUnique: uniqueIndex("password_reset_tokens_token_hash_unique").on(t.tokenHash),
+  }),
+);
+
 // Límites de longitud documentados en 01-solucion-final.md §2.1.
 // Se enforcean en la capa de validación de escritura (Etapa 5, zod),
 // no como CHECK de SQLite, para poder dar mensajes de error claros.
@@ -71,6 +93,39 @@ export const readApiKeys = sqliteTable(
 // puede seguir asociado a más de una app (es un array), solo que ya no hay
 // ningún otro dato de la app (id propio, bundle_id, etc.) que justifique una
 // tabla aparte.
+// "Tipo de producto" (ej. "libro"): lo crea cada usuario desde el dashboard,
+// no un desarrollador por código — es la diferencia clave con tener un
+// schema fijo por tipo. Un producto puede o no tener un tipo asignado
+// (`products.productTypeId`, nullable); si lo tiene, puede cargar valores
+// para los campos que ese tipo definió (ver `productTypeFields` y
+// `productFieldValues` más abajo). Título/descripción/etc. de `Product`
+// siguen siendo genéricos y no dependen del tipo — los campos de tipo son
+// siempre ADEMÁS de esos, nunca en reemplazo.
+export const productTypes = sqliteTable("product_types", {
+  id: id(),
+  ownerUserId: text("owner_user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(), // ej. "libro" — máx 60, ver validación en la ruta
+  ...timestamps,
+});
+
+// Un campo declarado por el usuario para un tipo (ej. "autor" en "libro").
+// Texto plano únicamente (mismo criterio que los campos de Product, ver
+// §2.1) — `fieldType` solo distingue una línea de varias, no hay campos
+// numéricos/fecha/etc. todavía porque no hay un caso real que los pida.
+export const productTypeFields = sqliteTable("product_type_fields", {
+  id: id(),
+  productTypeId: text("product_type_id")
+    .notNull()
+    .references(() => productTypes.id, { onDelete: "cascade" }),
+  name: text("name").notNull(), // ej. "autor" — máx 60
+  fieldType: text("field_type", { enum: ["text", "textarea"] }).notNull().default("text"),
+  required: integer("required", { mode: "boolean" }).notNull().default(false),
+  position: integer("position").notNull().default(0), // orden de aparición en el formulario
+  ...timestamps,
+});
+
 export const products = sqliteTable("products", {
   id: id(),
   ownerUserId: text("owner_user_id")
@@ -83,8 +138,35 @@ export const products = sqliteTable("products", {
   imagenAlt: text("imagen_alt"), // máx 125, opcional
   categoria: text("categoria").notNull(), // máx 40
   apps: text("apps", { mode: "json" }).notNull().$type<string[]>().default([]),
+  // Opcional: un producto no necesita tener un tipo. Si el tipo se borra,
+  // el producto no se borra con él — solo pierde la asignación (y con ella
+  // sus valores de campo, ver productFieldValues abajo, que cascadean por
+  // el campo, no por el producto).
+  productTypeId: text("product_type_id").references(() => productTypes.id, { onDelete: "set null" }),
   ...timestamps,
 });
+
+// Valor de un campo de tipo para un producto puntual (ej. producto X, campo
+// "autor" → "Robin Sharma"). Una fila por producto+campo — si el producto
+// cambia de tipo o el campo se borra, sus valores viejos se van con el
+// campo (`onDelete: cascade` en productTypeFieldId), no quedan huérfanos.
+export const productFieldValues = sqliteTable(
+  "product_field_values",
+  {
+    id: id(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    productTypeFieldId: text("product_type_field_id")
+      .notNull()
+      .references(() => productTypeFields.id, { onDelete: "cascade" }),
+    value: text("value").notNull().default(""),
+    ...timestamps,
+  },
+  (t) => ({
+    uniquePerField: uniqueIndex("product_field_values_product_field_unique").on(t.productId, t.productTypeFieldId),
+  }),
+);
 
 // Imágenes adicionales de un producto, más allá de la portada (`imagenUrl`
 // arriba, que no se toca para no romper el contrato ya consumido por las

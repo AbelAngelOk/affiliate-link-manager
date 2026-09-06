@@ -14,6 +14,8 @@ import { adminCheckRoutes } from "./routes/admin/check.js";
 import { adminApiKeysRoutes } from "./routes/admin/apiKeys.js";
 import { adminAccountRoutes } from "./routes/admin/account.js";
 import { adminProductImagesRoutes } from "./routes/admin/productImages.js";
+import { adminProductTypesRoutes } from "./routes/admin/productTypes.js";
+import { adminProductFieldValuesRoutes } from "./routes/admin/productFieldValues.js";
 import { internalRoutes } from "./routes/internal.js";
 
 // Separado de server.ts (que además hace `listen`) para que los scripts de
@@ -101,6 +103,8 @@ export async function buildApp() {
       await admin.register(adminApiKeysRoutes);
       await admin.register(adminAccountRoutes);
       await admin.register(adminProductImagesRoutes);
+      await admin.register(adminProductTypesRoutes);
+      await admin.register(adminProductFieldValuesRoutes);
     },
     { prefix: "/admin" },
   );

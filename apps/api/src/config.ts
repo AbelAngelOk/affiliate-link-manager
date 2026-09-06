@@ -27,4 +27,15 @@ export const config = {
     process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID
       ? { botToken: process.env.TELEGRAM_BOT_TOKEN, chatId: process.env.TELEGRAM_CHAT_ID }
       : null,
+  // Opcional: sin esto, el link de "olvidé mi contraseña" se loguea en
+  // consola en vez de mandarse por email de verdad (ver email/resend.ts) —
+  // mismo criterio que Telegram arriba, para poder deployar esto antes de
+  // tener la cuenta de Resend lista.
+  resend:
+    process.env.RESEND_API_KEY && process.env.RESEND_FROM_EMAIL
+      ? { apiKey: process.env.RESEND_API_KEY, fromEmail: process.env.RESEND_FROM_EMAIL }
+      : null,
+  // Base del dashboard, para armar el link de "olvidé mi contraseña"
+  // (ej. https://tu-dashboard.vercel.app/reset-password?token=...).
+  dashboardUrl: process.env.DASHBOARD_URL ?? "http://localhost:3001",
 };

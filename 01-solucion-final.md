@@ -21,15 +21,20 @@ Puntos nuevos que agrega el usuario y cómo se resuelven:
 ## 2. Modelo de datos
 
 ```
-User          (id, email, password_hash)
-Product       (id, owner_user_id, titulo[80], descripcion_corta[160],
-               descripcion_larga[500]?, imagen_url, imagen_alt[125]?,
-               categoria[40], apps[])
-ProductImage  (id, product_id, aspect_ratio [1:1|2:3|4:5], url, position)
-Slot          (id, product_id, dominio, affiliate_url, priority,
-               status [active|broken], last_checked_at, last_ok_at)
-CheckLog      (id, slot_id, checked_at, resultado, detalle)
-ReadApiKey    (id, user_id, key_hash, name, revoked_at)
+User               (id, email, password_hash)
+PasswordResetToken (id, user_id, token_hash, expires_at, used_at)
+Product            (id, owner_user_id, titulo[80], descripcion_corta[160],
+                    descripcion_larga[500]?, imagen_url, imagen_alt[125]?,
+                    categoria[40], apps[], product_type_id?)
+ProductImage       (id, product_id, aspect_ratio [1:1|2:3|4:5], url, position)
+ProductType        (id, owner_user_id, name)
+ProductTypeField   (id, product_type_id, name, field_type [text|textarea],
+                    required, position)
+ProductFieldValue  (id, product_id, product_type_field_id, value)
+Slot               (id, product_id, dominio, affiliate_url, priority,
+                    status [active|broken], last_checked_at, last_ok_at)
+CheckLog           (id, slot_id, checked_at, resultado, detalle)
+ReadApiKey         (id, user_id, key_hash, name, revoked_at)
 ```
 
 Notas clave:
@@ -71,6 +76,15 @@ Agregado el 2026-09-06, a pedido explícito: además de `imagen_url` (la portada
 - **`GET /v1/products` agrupa las imágenes por conjunto** en un campo `imagenes` (ej. `{"1:1": ["url1", "url2"], "2:3": ["url3"]}`) — solo aparecen las claves que efectivamente tienen alguna imagen cargada, para que la app consumidora no tenga que distinguir "array vacío" de "conjunto no usado" (es lo mismo en la práctica).
 - **Sin reordenar todavía**: las imágenes de un conjunto se muestran en el orden en que se cargaron (`position`, autoincremental); no hay una acción de "mover" en el panel — si hace falta cambiar el orden, hoy la única forma es borrar y volver a cargar en el orden deseado.
 
+### 2.4 Tipos de producto con campos dinámicos
+
+Agregado el 2026-09-06, a pedido explícito: cada usuario puede crear sus propios "tipos de producto" (ej. "libro") **desde el dashboard, sin que haga falta un cambio de código** — a diferencia de un schema fijo por tipo, que hubiera requerido una migración cada vez que se quisiera un tipo nuevo. Un tipo es solo un nombre + una lista de campos (ej. "autor", "nota del propietario"); cada campo declara si es de una línea o texto largo, y si es obligatorio.
+
+- **Los campos de tipo son ADEMÁS de los genéricos de `Product`, no en reemplazo.** Título/descripción/imagen siguen siendo los mismos de siempre — un tipo solo agrega información extra específica de ese tipo de producto.
+- **Un producto puede tener cero o un tipo asignado** (`products.product_type_id`, nullable) — no es obligatorio usar esto. Si se borra el tipo, el producto no se borra con él, solo pierde la asignación (`ON DELETE SET NULL`).
+- **Los valores se guardan aparte** (`ProductFieldValue`, una fila por producto+campo) — `PUT /admin/products/{id}/field-values` reemplaza todos los valores de una vez (simple para esta escala, no hace falta un upsert fila por fila) y rechaza con `422` si falta un campo marcado obligatorio.
+- **No se exponen todavía en `GET /v1/products`** — son datos de gestión interna (el ejemplo real fue "nota del propietario de la web", pensado para uso del panel, no para las apps consumidoras). Si en algún momento hiciera falta exponerlos, es un campo más a agregar al DTO público, no un cambio de modelo.
+
 ## 3. Autenticación y aislamiento por entorno
 
 **Multi-tenant implementado, aunque hoy solo exista un tenant real (vos).** Se adelantó la migración documentada originalmente para "cuando escale" — no porque ya haya un segundo usuario, sino para no tener que tocar la capa de auth más adelante bajo presión. Auth por **email + contraseña**, un solo registro que sirve para las dos formas de usar el sistema:
@@ -81,6 +95,7 @@ Agregado el 2026-09-06, a pedido explícito: además de `imagen_url` (la portada
 - **Aislamiento:** cada endpoint filtra por `owner_user_id = request.userId`, sin importar si ese `userId` vino del JWT o de una read key — el `Product`/`Slot` de una cuenta nunca aparece en las queries de otra. Verificado en vivo: dos cuentas registradas por separado no se ven entre sí.
 - **`/internal/check`** (el que dispara el cron) usa una tercera credencial totalmente aparte, `INTERNAL_KEY` (`plugins/requireInternalKey.ts`) — no tiene sentido detrás de un login humano, es un secreto de infraestructura fijo.
 - **No hay dashboard multi-usuario para administrar cuentas ajenas:** cada quien administra únicamente lo suyo, entrando con su propio login — no existe un rol "root" que vea o gestione las cuentas de otros.
+- **Recuperar contraseña, agregado el 2026-09-06.** `POST /auth/forgot-password` (email) genera un token de un solo uso (`PasswordResetToken`, hash sha256 igual que las read API keys, vence a la hora) y manda un link por email vía Resend (`email/resend.ts`) — siempre devuelve `204` exista o no la cuenta, mismo criterio que `/auth/login` para no dar pistas. `POST /auth/reset-password` (token + contraseña nueva) lo canjea; un token usado o vencido no sirve dos veces. Sin `RESEND_API_KEY`/`RESEND_FROM_EMAIL` configurados, degrada a loguear el link en consola (mismo patrón que `notifications/telegram.ts`) — así se pudo implementar y deployar el flujo completo antes de tener la cuenta de Resend lista.
 
 ## 4. Endpoints
 

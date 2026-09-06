@@ -6,12 +6,19 @@ import type { Slot } from "@/app/(admin)/slots/columns";
 import { validateProduct } from "@/app/(admin)/productos/actions";
 import { Button } from "@/components/ui/button";
 import { ProductImages, type ProductImage } from "./ProductImages";
+import { ProductTypeSection } from "./ProductTypeSection";
+
+type ProductType = { id: string; name: string };
+type FieldValue = { id: string; name: string; fieldType: "text" | "textarea"; required: boolean; value: string };
 
 export default async function ProductoDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: productId } = await params;
-  const [slots, images] = await Promise.all([
+  const [slots, images, product, types, fieldValues] = await Promise.all([
     apiFetch<Slot[]>(`/admin/products/${productId}/slots`),
     apiFetch<ProductImage[]>(`/admin/products/${productId}/images`),
+    apiFetch<{ productTypeId: string | null }>(`/admin/products/${productId}`),
+    apiFetch<ProductType[]>("/admin/product-types"),
+    apiFetch<FieldValue[]>(`/admin/products/${productId}/field-values`),
   ]);
 
   return (
@@ -36,6 +43,13 @@ export default async function ProductoDetailPage({ params }: { params: Promise<{
       <SlotsTable productId={productId} slots={slots} />
 
       <ProductImages productId={productId} images={images} />
+
+      <ProductTypeSection
+        productId={productId}
+        types={types}
+        currentTypeId={product.productTypeId}
+        fields={fieldValues}
+      />
     </main>
   );
 }

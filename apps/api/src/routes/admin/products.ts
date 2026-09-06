@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { and, eq } from "drizzle-orm";
 import { db } from "../../db/client.js";
-import { products } from "../../db/schema.js";
+import { products, productTypes } from "../../db/schema.js";
 
 // Texto plano únicamente (rechaza < y >) y límites de longitud según
 // 01-solucion-final.md §2.1 — se enforcean acá, en la escritura, para que
@@ -28,6 +28,8 @@ const productBodySchema = {
     imagen_alt: plainText(125, 0),
     categoria: plainText(40),
     apps: { type: "array", items: appName, default: [] },
+    // Opcional — ver db/schema.ts. `null` explícito desasigna el tipo.
+    product_type_id: { type: ["string", "null"] },
   },
 } as const;
 
@@ -39,7 +41,16 @@ type ProductBody = {
   imagen_alt?: string;
   categoria: string;
   apps?: string[];
+  product_type_id?: string | null;
 };
+
+async function isOwnProductType(productTypeId: string, ownerUserId: string): Promise<boolean> {
+  const [type] = await db
+    .select({ id: productTypes.id })
+    .from(productTypes)
+    .where(and(eq(productTypes.id, productTypeId), eq(productTypes.ownerUserId, ownerUserId)));
+  return Boolean(type);
+}
 
 export async function adminProductsRoutes(fastify: FastifyInstance) {
   fastify.get(
@@ -50,12 +61,30 @@ export async function adminProductsRoutes(fastify: FastifyInstance) {
     },
   );
 
+  fastify.get<{ Params: { id: string } }>(
+    "/products/:id",
+    { schema: { tags: ["admin"], summary: "Trae un producto puntual" } },
+    async (request, reply) => {
+      const [product] = await db
+        .select()
+        .from(products)
+        .where(and(eq(products.id, request.params.id), eq(products.ownerUserId, request.userId)));
+      if (!product) return reply.code(404).send({ error: "product_not_found" });
+      return product;
+    },
+  );
+
   fastify.post<{ Body: ProductBody }>(
     "/products",
     { schema: { tags: ["admin"], summary: "Crea un producto", body: productBodySchema } },
     async (request, reply) => {
       const ownerUserId = request.userId;
       const b = request.body;
+
+      if (b.product_type_id && !(await isOwnProductType(b.product_type_id, ownerUserId))) {
+        return reply.code(422).send({ error: "product_type_not_found" });
+      }
+
       const [created] = await db
         .insert(products)
         .values({
@@ -67,6 +96,7 @@ export async function adminProductsRoutes(fastify: FastifyInstance) {
           imagenAlt: b.imagen_alt,
           categoria: b.categoria,
           apps: b.apps ?? [],
+          productTypeId: b.product_type_id ?? null,
         })
         .returning();
       return reply.code(201).send(created);
@@ -86,6 +116,11 @@ export async function adminProductsRoutes(fastify: FastifyInstance) {
       const ownerUserId = request.userId;
       const { id } = request.params;
       const b = request.body;
+
+      if (b.product_type_id && !(await isOwnProductType(b.product_type_id, ownerUserId))) {
+        return reply.code(422).send({ error: "product_type_not_found" });
+      }
+
       const patch: Record<string, unknown> = {};
       if (b.titulo !== undefined) patch.titulo = b.titulo;
       if (b.descripcion_corta !== undefined) patch.descripcionCorta = b.descripcion_corta;
@@ -94,6 +129,7 @@ export async function adminProductsRoutes(fastify: FastifyInstance) {
       if (b.imagen_alt !== undefined) patch.imagenAlt = b.imagen_alt;
       if (b.categoria !== undefined) patch.categoria = b.categoria;
       if (b.apps !== undefined) patch.apps = b.apps;
+      if (b.product_type_id !== undefined) patch.productTypeId = b.product_type_id;
 
       const [updated] = await db
         .update(products)

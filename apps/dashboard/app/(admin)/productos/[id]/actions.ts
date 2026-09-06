@@ -40,3 +40,31 @@ export async function deleteProductImage(formData: FormData) {
   await apiFetch(`/admin/products/${productId}/images/${imageId}`, { method: "DELETE" });
   revalidatePath(`/productos/${productId}`);
 }
+
+export async function setProductType(formData: FormData) {
+  const productId = formData.get("productId") as string;
+  const productTypeId = formData.get("productTypeId") as string;
+  await apiFetch(`/admin/products/${productId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ product_type_id: productTypeId || null }),
+  });
+  revalidatePath(`/productos/${productId}`);
+}
+
+// Directo desde el cliente (no <form action>) para poder mostrar el motivo
+// específico si falta un campo obligatorio, en vez de un error genérico.
+export async function saveFieldValues(productId: string, values: Record<string, string>): Promise<{ error?: string }> {
+  try {
+    await apiFetch(`/admin/products/${productId}/field-values`, {
+      method: "PUT",
+      body: JSON.stringify({ values }),
+    });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 422) {
+      return { error: "Falta cargar un campo obligatorio." };
+    }
+    return { error: "No se pudieron guardar los campos." };
+  }
+  revalidatePath(`/productos/${productId}`);
+  return {};
+}
