@@ -72,6 +72,17 @@ La API (Fastify) y el front (Next.js — docs + dashboard) son **procesos/deploy
 - Repos separados solo tendría sentido si en algún momento se quiere dar acceso al código de uno de los dos a otra persona con permisos distintos, o publicar la API como proyecto independiente de terceros — ninguno de los dos casos aplica hoy.
 - El deploy sigue siendo independiente por paquete (la API a Fly.io/Railway, el front a Vercel), el monorepo es solo una decisión de organización de código fuente, no ata el despliegue de uno al del otro.
 
+## 3.6.1 Un tercer paquete: servidor MCP (`apps/mcp`)
+
+Agregado el 2026-10-09, a pedido explícito: un servidor MCP (Model Context Protocol) que envuelve `/admin/*` como herramientas para que Claude Code administre este proyecto **desde cualquier otra carpeta**, no solo trabajando dentro de este repo. No es lo mismo que la API REST — MCP es el protocolo que le permite a un agente de IA *descubrir* qué puede hacer (cada herramienta trae su propio nombre/descripción/schema), mientras que la API REST exige que quien la llama ya sepa de antemano qué endpoint pegar con qué body.
+
+- **No tiene lógica propia.** Cada herramienta (`@modelcontextprotocol/sdk`, `apps/mcp/src/tools/*.ts`) es un `fetch()` a la API real — el servidor MCP es una capa de traducción, no una reimplementación. Si la API cambia, el MCP se actualiza tocando la llamada, no la regla de negocio (esa sigue viviendo solo en `apps/api`).
+- **Transporte stdio, no HTTP.** Corre como proceso local que Claude Code lanza y le habla por stdin/stdout — no hace falta deployarlo a ningún lado ni darle una URL pública, a diferencia de la API y el dashboard.
+- **Usa el JWT de sesión, no una read API key.** `/admin/*` (a diferencia de `/v1/*`) no acepta esas keys — son solo de lectura. El servidor se loguea con `LINKS_REFERIDOS_EMAIL`/`LINKS_REFERIDOS_PASSWORD` (las mismas credenciales del dashboard) al arrancar, y vuelve a loguearse solo si el JWT cacheado vence o deja de servir.
+- **No expone `/v1/*` ni cambio de contraseña** — fuera del alcance de "administrar productos/links" que motivó esto.
+
+Ver `apps/mcp/README.md` para cómo registrarlo en Claude Code (`claude mcp add`).
+
 ## 3.7 Resto del stack
 
 - **Job programado:** GitHub Actions con cron, pegándole a un endpoint interno protegido con la misma API key.

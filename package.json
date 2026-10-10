@@ -5,6 +5,8 @@
     "apps/*"
   ],
   "scripts": {
-    "dev:api": "npm run dev --workspace=apps/api"
+    "dev:api": "npm run dev --workspace=apps/api",
+    "dev:mcp": "npm run dev --workspace=apps/mcp",
+    "build:mcp": "npm run build --workspace=apps/mcp"
   }
 }
