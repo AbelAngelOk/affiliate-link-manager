@@ -101,6 +101,7 @@ Cada etapa es chica, verificable y deja el proyecto en un estado funcional — n
 
 ## Fuera de este plan (a futuro, no ahora)
 - Overrides de texto por app y marketplaces adicionales — ver `04-alcance-y-limitaciones.md` §4.2.
+- **Migración de los datos y la lectura a la base Supabase compartida** (propuesta del 2026-11-05, sin prioridad): sesiones L0–L6 en `09-migracion-a-base-compartida.md`. Si se hace, las Etapas 7 (verificador), 9 (dashboard) y 11 (deploy) de este plan cambian de lugar.
 
 ## Pendientes anotados (2026-09-05, a resolver en otro momento)
 
